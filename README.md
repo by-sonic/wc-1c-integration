@@ -16,8 +16,6 @@
 
 ---
 
-<img src="https://raw.githubusercontent.com/by-sonic/wc-1c-integration/main/assets/images/banner.png" alt="WooCommerce 1C Integration Banner" width="100%">
-
 </div>
 
 ## Проблема
