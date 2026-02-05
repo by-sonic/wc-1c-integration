@@ -1,0 +1,29 @@
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Ignore logs
+*.log
+debug.log
+
+# Ignore dependencies
+/vendor/
+/node_modules/
+
+# Ignore build files
+*.zip
+*.tar.gz
+
+# Ignore temp files
+*.tmp
+*.swp
+*~
+
+# Ignore exchange files
+/uploads/wc-1c-exchange/
