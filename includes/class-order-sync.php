@@ -102,14 +102,14 @@ class WC1C_Order_Sync {
             return $existing_guid;
         }
 
-        // Generate new GUID
+        // Generate new GUID (v4 UUID via CSPRNG)
         $guid = sprintf(
             '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
-            mt_rand(0, 0xffff),
-            mt_rand(0, 0x0fff) | 0x4000,
-            mt_rand(0, 0x3fff) | 0x8000,
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+            random_int(0, 0xffff), random_int(0, 0xffff),
+            random_int(0, 0xffff),
+            random_int(0, 0x0fff) | 0x4000,
+            random_int(0, 0x3fff) | 0x8000,
+            random_int(0, 0xffff), random_int(0, 0xffff), random_int(0, 0xffff)
         );
 
         $order->update_meta_data('_wc1c_order_guid', $guid);
@@ -135,11 +135,11 @@ class WC1C_Order_Sync {
         if (empty($guid)) {
             $guid = sprintf(
                 '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-                mt_rand(0, 0xffff), mt_rand(0, 0xffff),
-                mt_rand(0, 0xffff),
-                mt_rand(0, 0x0fff) | 0x4000,
-                mt_rand(0, 0x3fff) | 0x8000,
-                mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+                random_int(0, 0xffff), random_int(0, 0xffff),
+                random_int(0, 0xffff),
+                random_int(0, 0x0fff) | 0x4000,
+                random_int(0, 0x3fff) | 0x8000,
+                random_int(0, 0xffff), random_int(0, 0xffff), random_int(0, 0xffff)
             );
             update_user_meta($customer_id, '_wc1c_customer_guid', $guid);
         }
@@ -336,13 +336,17 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Find order by 1C GUID
+     * Find order by 1C GUID (HPOS-compatible meta_query)
      */
     private function find_order_by_guid(string $guid): ?WC_Order {
         $orders = wc_get_orders([
-            'meta_key' => '_wc1c_order_guid',
-            'meta_value' => $guid,
             'limit' => 1,
+            'meta_query' => [
+                [
+                    'key'   => '_wc1c_order_guid',
+                    'value' => $guid,
+                ],
+            ],
         ]);
 
         return !empty($orders) ? $orders[0] : null;
@@ -381,7 +385,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Get export statistics
+     * Get export statistics (HPOS-compatible)
      */
     public function get_export_stats(): array {
         global $wpdb;
@@ -393,24 +397,45 @@ class WC1C_Order_Sync {
             'needs_update' => 0,
         ];
 
-        // Get total orders
-        $stats['total_orders'] = (int)$wpdb->get_var(
-            "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'shop_order'"
-        );
+        $hpos_enabled = class_exists('\Automattic\WooCommerce\Utilities\OrderUtil')
+            && \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
 
-        // Get exported count
-        $stats['exported'] = (int)$wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %s",
-            '_wc1c_exported',
-            '1'
-        ));
+        if ($hpos_enabled) {
+            $orders_table = $wpdb->prefix . 'wc_orders';
+            $meta_table   = $wpdb->prefix . 'wc_orders_meta';
 
-        // Get needs update count
-        $stats['needs_update'] = (int)$wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %s",
-            '_wc1c_needs_update',
-            '1'
-        ));
+            $stats['total_orders'] = (int) $wpdb->get_var(
+                "SELECT COUNT(*) FROM {$orders_table} WHERE type = 'shop_order'"
+            );
+
+            $stats['exported'] = (int) $wpdb->get_var( $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$meta_table} WHERE meta_key = %s AND meta_value = %s",
+                '_wc1c_exported',
+                '1'
+            ) );
+
+            $stats['needs_update'] = (int) $wpdb->get_var( $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$meta_table} WHERE meta_key = %s AND meta_value = %s",
+                '_wc1c_needs_update',
+                '1'
+            ) );
+        } else {
+            $stats['total_orders'] = (int) $wpdb->get_var(
+                "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'shop_order'"
+            );
+
+            $stats['exported'] = (int) $wpdb->get_var( $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %s",
+                '_wc1c_exported',
+                '1'
+            ) );
+
+            $stats['needs_update'] = (int) $wpdb->get_var( $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value = %s",
+                '_wc1c_needs_update',
+                '1'
+            ) );
+        }
 
         $stats['pending_export'] = $stats['total_orders'] - $stats['exported'];
 

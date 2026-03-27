@@ -178,8 +178,8 @@ class WC1C_Exchange_Endpoint {
      * Check authentication
      */
     private function check_auth(): void {
-        // Start session
-        $session_id = md5(uniqid(mt_rand(), true));
+        // Start session (CSPRNG-based token)
+        $session_id = bin2hex(random_bytes(16));
         $upload_dir = wp_upload_dir();
         $this->session_file = $upload_dir['basedir'] . '/wc-1c-exchange/session_' . $session_id;
 

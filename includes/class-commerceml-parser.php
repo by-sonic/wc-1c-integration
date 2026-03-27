@@ -517,7 +517,7 @@ class WC1C_CommerceML_Parser {
                 
                 $base_unit = $product->addChild('БазоваяЕдиница', 'шт');
                 $base_unit->addAttribute('Код', '796');
-                $base_unit->addAttribute('НаsименованиеПолное', 'Штука');
+                $base_unit->addAttribute('НаименованиеПолное', 'Штука');
                 
                 $product->addChild('ЦенаЗаЕдиницу', $item['price']);
                 $product->addChild('Количество', $item['quantity']);
@@ -529,7 +529,7 @@ class WC1C_CommerceML_Parser {
                     $discount = $discounts->addChild('Скидка');
                     $discount->addChild('Наименование', 'Скидка');
                     $discount->addChild('Сумма', $item['discount']);
-                    $discount->addChild('УчssтьВСумме', 'true');
+                    $discount->addChild('УчтеноВСумме', 'true');
                 }
             }
         }

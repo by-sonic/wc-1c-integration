@@ -11,9 +11,9 @@
  * Text Domain: wc-1c-integration
  * Domain Path: /languages
  * Requires at least: 5.8
- * Requires PHP: 7.4
+ * Requires PHP: 7.4|8.4
  * WC requires at least: 5.0
- * WC tested up to: 8.5
+ * WC tested up to: 10.6
  *
  * @package WC_1C_Integration
  */
@@ -242,6 +242,15 @@ final class WC_1C_Integration {
         }
     }
 }
+
+/**
+ * Declare HPOS compatibility (WooCommerce 10.x+)
+ */
+add_action('before_woocommerce_init', function () {
+    if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+    }
+});
 
 /**
  * Returns main plugin instance
