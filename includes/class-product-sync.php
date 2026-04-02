@@ -17,12 +17,49 @@ class WC1C_Product_Sync {
     /** @var string Имя таблицы связей ID */
     private string $mapping_table;
 
+    /** @var array ID родительских товаров, у которых есть вариации (заполняется в sync_products) */
+    private array $variation_parent_ids = [];
+
     /**
      * Конструктор
      */
     public function __construct() {
         global $wpdb;
         $this->mapping_table = $wpdb->prefix . 'wc1c_id_mapping';
+    }
+
+    /**
+     * Транслитерация кириллицы в латиницу для taxonomy slug
+     */
+    private function transliterate(string $str): string {
+        $map = [
+            'а'=>'a','б'=>'b','в'=>'v','г'=>'g','д'=>'d','е'=>'e','ё'=>'yo','ж'=>'zh',
+            'з'=>'z','и'=>'i','й'=>'j','к'=>'k','л'=>'l','м'=>'m','н'=>'n','о'=>'o',
+            'п'=>'p','р'=>'r','с'=>'s','т'=>'t','у'=>'u','ф'=>'f','х'=>'h','ц'=>'c',
+            'ч'=>'ch','ш'=>'sh','щ'=>'shch','ъ'=>'','ы'=>'y','ь'=>'','э'=>'e','ю'=>'yu','я'=>'ya',
+            'А'=>'A','Б'=>'B','В'=>'V','Г'=>'G','Д'=>'D','Е'=>'E','Ё'=>'Yo','Ж'=>'Zh',
+            'З'=>'Z','И'=>'I','Й'=>'J','К'=>'K','Л'=>'L','М'=>'M','Н'=>'N','О'=>'O',
+            'П'=>'P','Р'=>'R','С'=>'S','Т'=>'T','У'=>'U','Ф'=>'F','Х'=>'H','Ц'=>'C',
+            'Ч'=>'Ch','Ш'=>'Sh','Щ'=>'Shch','Ъ'=>'','Ы'=>'Y','Ь'=>'','Э'=>'E','Ю'=>'Yu','Я'=>'Ya',
+        ];
+        return strtr($str, $map);
+    }
+
+    /**
+     * Безопасный slug для атрибутов (кириллица → латиница)
+     */
+    private function make_attribute_slug(string $name): string {
+        $slug = $this->transliterate($name);
+        $slug = strtolower($slug);
+        $slug = preg_replace('/[^a-z0-9_-]/', '-', $slug);
+        $slug = preg_replace('/-+/', '-', $slug);
+        $slug = trim($slug, '-');
+
+        if (empty($slug)) {
+            $slug = 'attr-' . substr(md5($name), 0, 8);
+        }
+
+        return substr($slug, 0, 28);
     }
 
     /**
@@ -145,6 +182,14 @@ class WC1C_Product_Sync {
             'skipped' => 0,
             'errors' => [],
         ];
+
+        // Определяем, какие товары имеют вариации
+        $this->variation_parent_ids = [];
+        foreach ($products as $product) {
+            if ($product['is_variation'] && !empty($product['parent_id'])) {
+                $this->variation_parent_ids[$product['parent_id']] = true;
+            }
+        }
 
         // Первый проход: простые товары и родители вариативных
         foreach ($products as $product) {
@@ -324,7 +369,7 @@ class WC1C_Product_Sync {
         $product_attributes = [];
 
         foreach ($attributes as $attr) {
-            $attr_name = wc_sanitize_taxonomy_name($attr['name']);
+            $attr_name = $this->make_attribute_slug($attr['name']);
             $attr_slug = 'pa_' . $attr_name;
 
             $this->maybe_create_attribute_taxonomy($attr_name, $attr['name']);
@@ -416,7 +461,19 @@ class WC1C_Product_Sync {
         }
 
         $parent_product = wc_get_product($parent_wc_id);
-        if (!$parent_product || !$parent_product->is_type('variable')) {
+        if (!$parent_product) {
+            throw new Exception('Родительский товар не найден в WooCommerce');
+        }
+
+        // Конвертируем Simple → Variable при необходимости
+        if ($parent_product->is_type('simple')) {
+            $parent_id = $parent_product->get_id();
+            wp_set_object_terms($parent_id, 'variable', 'product_type');
+            wc_delete_product_transients($parent_id);
+            $parent_product = wc_get_product($parent_id);
+        }
+
+        if (!$parent_product->is_type('variable')) {
             throw new Exception('Родительский товар не является вариативным');
         }
 
@@ -448,7 +505,7 @@ class WC1C_Product_Sync {
         if (!empty($offer['characteristics'])) {
             $attributes = [];
             foreach ($offer['characteristics'] as $char) {
-                $attr_name = 'pa_' . wc_sanitize_taxonomy_name($char['name']);
+                $attr_name = 'pa_' . $this->make_attribute_slug($char['name']);
                 $attributes[$attr_name] = $char['value'];
                 
                 $this->add_variation_attribute_to_parent($parent_product, $char);
@@ -481,10 +538,10 @@ class WC1C_Product_Sync {
      * Добавление атрибута вариации к родительскому товару
      */
     private function add_variation_attribute_to_parent(WC_Product_Variable $parent, array $char): void {
-        $attr_slug = 'pa_' . wc_sanitize_taxonomy_name($char['name']);
+        $attr_slug = 'pa_' . $this->make_attribute_slug($char['name']);
         
         $this->maybe_create_attribute_taxonomy(
-            wc_sanitize_taxonomy_name($char['name']),
+            $this->make_attribute_slug($char['name']),
             $char['name']
         );
 
@@ -528,7 +585,7 @@ class WC1C_Product_Sync {
      * Проверка наличия вариаций у товара
      */
     private function product_has_variations(string $product_id): bool {
-        return false;
+        return isset($this->variation_parent_ids[$product_id]);
     }
 
     /**

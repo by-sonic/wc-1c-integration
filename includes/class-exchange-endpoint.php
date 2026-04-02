@@ -214,10 +214,22 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
+     * Безопасная обработка имени файла от 1С (сохраняет кириллицу, убирает path traversal)
+     */
+    private function sanitize_exchange_filename(string $filename): string {
+        $filename = urldecode($filename);
+        $filename = str_replace('\\', '/', $filename);
+        $filename = preg_replace('#\.\./#', '', $filename);
+        $filename = preg_replace('#/+#', '/', $filename);
+        $filename = ltrim($filename, '/');
+        return $filename;
+    }
+
+    /**
      * Приём файла от 1С
      */
     private function receive_file(): void {
-        $filename = isset($_GET['filename']) ? sanitize_file_name($_GET['filename']) : '';
+        $filename = isset($_GET['filename']) ? $this->sanitize_exchange_filename($_GET['filename']) : '';
         
         if (empty($filename)) {
             $this->send_error('Имя файла обязательно');
@@ -258,7 +270,7 @@ class WC1C_Exchange_Endpoint {
      * Импорт каталога из полученных файлов
      */
     private function import_catalog(): void {
-        $filename = isset($_GET['filename']) ? sanitize_file_name($_GET['filename']) : '';
+        $filename = isset($_GET['filename']) ? $this->sanitize_exchange_filename($_GET['filename']) : '';
         
         $upload_dir = wp_upload_dir();
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
@@ -383,7 +395,7 @@ class WC1C_Exchange_Endpoint {
      * Приём файла обновлений заказов из 1С
      */
     private function receive_order_file(): void {
-        $filename = isset($_GET['filename']) ? sanitize_file_name($_GET['filename']) : '';
+        $filename = isset($_GET['filename']) ? $this->sanitize_exchange_filename($_GET['filename']) : '';
         
         $upload_dir = wp_upload_dir();
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
