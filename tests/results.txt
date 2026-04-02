@@ -1,0 +1,142 @@
+Waiting for WordPress files to be ready...
+Waiting for database...
+Database is ready.
+Installing WordPress...
+Success: WordPress installed successfully.
+WordPress installed.
+Setting permalink structure...
+Success: Rewrite structure set.
+Success: Rewrite rules flushed.
+Setup complete. Running tests...
+
+===== 1. WordPress core sanity =====
+  [PASS] wp core version: 6.8.3
+
+===== 2. Install & activate WooCommerce =====
+Installing WooCommerce (10.6.2)
+Warning: Failed to create directory '/.wp-cli/cache/': mkdir(): Permission denied.
+Downloading installation package from https://downloads.wordpress.org/plugin/woocommerce.10.6.2.zip...
+Unpacking the package...
+Installing the plugin...
+Plugin installed successfully.
+Activating 'woocommerce'...
+Plugin 'woocommerce' activated.
+Success: Installed 1 of 1 plugins.
+  [PASS] WooCommerce installed & activated
+  [PASS] WooCommerce is active
+  [PASS] WooCommerce version: 10.6.2
+
+===== 3. Activate wc-1c-integration plugin =====
+  Plugin found in plugins dir
+  [PASS] Plugin activated
+  [PASS] Plugin is active (confirmed)
+
+===== 4. Check PHP syntax (lint) of all plugin files =====
+  [PASS] Lint OK: wc-1c-integration.php
+  [PASS] Lint OK: class-commerceml-parser.php
+  [PASS] Lint OK: class-exchange-endpoint.php
+  [PASS] Lint OK: class-product-sync.php
+  [PASS] Lint OK: class-order-sync.php
+  [PASS] Lint OK: class-logger.php
+  [PASS] Lint OK: class-admin-settings.php
+
+===== 5. Database tables created =====
+  [PASS] Table wc1c_id_mapping exists
+  [PASS] Table wc1c_sync_log exists
+  [PASS] id_mapping has guid_1c column
+  [PASS] id_mapping has wc_id column
+
+===== 6. Default plugin options set =====
+  [PASS] Option wc1c_enabled = yes
+  [PASS] Option wc1c_sync_images = yes
+  [PASS] Option wc1c_sync_categories = yes
+  [PASS] Option wc1c_sync_attributes = yes
+  [PASS] Option wc1c_sync_stock = yes
+  [PASS] Option wc1c_sync_prices = yes
+  [PASS] Option wc1c_price_type = Розничная
+
+===== 7. Rewrite rules flushed (exchange endpoint registered) =====
+Success: Rewrite rules flushed.
+  [PASS] Rewrite rule for 1c-exchange registered
+
+===== 8. CommerceML Parser — parse import.xml =====
+  [PASS] parse_import: OK categories=4 properties=2 products=3
+  [PASS] Parsed 4 categories (incl. nested)
+  [PASS] Parsed 2 properties
+  [PASS] Parsed 3 products
+
+===== 9. CommerceML Parser — parse offers.xml =====
+  [PASS] parse_offers: OK price_types=2 warehouses=1 offers=2
+  [PASS] Parsed 2 price types (Розничная, Оптовая)
+  [PASS] Parsed 2 offers
+
+===== 10. CommerceML Parser — validate parsed product data =====
+  [PASS] Product data: sku_ok
+  [PASS] Product data: name_ok
+  [PASS] Product data: barcode_ok
+  [PASS] Product data: cat_ok
+  [PASS] Product data: not_variation_ok
+  [PASS] Product data: weight_ok
+  [PASS] Product data: attr_ok
+  [PASS] Product data: deleted_ok
+
+===== 11. CommerceML Parser — validate parsed offer data =====
+  [PASS] Offer data: stock_ok
+  [PASS] Offer data: retail_price_ok
+  [PASS] Offer data: warehouse_stock_ok
+
+===== 12. Order export XML generation =====
+  [PASS] Order XML: xml_header_ok
+  [PASS] Order XML: root_ok
+  [PASS] Order XML: document_ok
+  [PASS] Order XML: order_number_ok
+  [PASS] Order XML: status_mapped_ok
+  [PASS] Order XML: contractor_ok
+  [PASS] Order XML: customer_name_ok
+  [PASS] Order XML: item_sku_ok
+  [PASS] Order XML: unit_attr_ok
+  [PASS] Order XML: schema_ver_ok
+
+===== 13. Exchange endpoint HTTP tests =====
+  [PASS] Endpoint checkauth returns 'success'
+  [PASS] Endpoint init returns file_limit
+  [PASS] Endpoint init returns zip=no
+  [PASS] Sale endpoint init returns file_limit
+  [PASS] Unknown type returns 'failure'
+
+===== 14. Exchange endpoint — authentication =====
+Success: Updated 'wc1c_username' option.
+Success: Updated 'wc1c_password' option.
+  [PASS] No-auth request rejected
+  [PASS] Authenticated request returns 'success'
+  [PASS] Wrong credentials rejected
+Success: Updated 'wc1c_username' option.
+Success: Updated 'wc1c_password' option.
+
+===== 15. Logger =====
+  [PASS] Logger: info_logged
+  [PASS] Logger: error_logged
+  [PASS] Logger: debug_hidden_ok
+  [PASS] Logger: debug mode works when enabled
+
+===== 16. HPOS compatibility declaration =====
+  [PASS] HPOS FeaturesUtil check: FeaturesUtil_exists
+
+===== 17. Full CommerceML workflow simulation =====
+  [PASS] Workflow: 4 categories created
+  [PASS] Workflow: 0 category failures
+  [PASS] Workflow: root category 'Электроника' exists
+  [PASS] Workflow: subcategory 'Смартфоны' exists
+  [PASS] Workflow: category hierarchy correct
+  [PASS] Workflow: 2 products created (deleted excluded)
+
+===== 18. WordPress error log check =====
+  [PASS] No debug.log (no errors occurred)
+
+===== 19. Plugin deactivation/reactivation =====
+  [PASS] Plugin deactivated
+  [PASS] Plugin reactivated
+
+========================================
+  RESULTS: 75 passed / 0 failed / 75 total
+========================================

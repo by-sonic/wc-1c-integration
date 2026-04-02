@@ -1,6 +1,6 @@
 <?php
 /**
- * Product Sync
+ * Синхронизация товаров
  *
  * Синхронизация товаров из 1С в WooCommerce
  *
@@ -10,17 +10,15 @@
 defined('ABSPATH') || exit;
 
 /**
- * Product Sync class
+ * Класс синхронизации товаров
  */
 class WC1C_Product_Sync {
 
-    /**
-     * ID mapping table name
-     */
+    /** @var string Имя таблицы связей ID */
     private string $mapping_table;
 
     /**
-     * Constructor
+     * Конструктор
      */
     public function __construct() {
         global $wpdb;
@@ -28,10 +26,10 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Sync categories from 1C
+     * Синхронизация категорий из 1С
      *
-     * @param array $categories Parsed categories from CommerceML
-     * @return array Results with created/updated counts
+     * @param array $categories Разобранные категории из CommerceML
+     * @return array Результаты: кол-во созданных/обновлённых
      */
     public function sync_categories(array $categories): array {
         $results = [
@@ -45,7 +43,6 @@ class WC1C_Product_Sync {
             return $results;
         }
 
-        // Sort categories to process parents first
         $sorted = $this->sort_categories_by_hierarchy($categories);
 
         foreach ($sorted as $category) {
@@ -59,7 +56,7 @@ class WC1C_Product_Sync {
             } catch (Exception $e) {
                 $results['failed']++;
                 $results['errors'][] = sprintf(
-                    __('Category "%s": %s', 'wc-1c-integration'),
+                    'Категория «%s»: %s',
                     $category['name'],
                     $e->getMessage()
                 );
@@ -70,7 +67,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Sort categories by hierarchy (parents first)
+     * Сортировка категорий по иерархии (родительские — первыми)
      */
     private function sort_categories_by_hierarchy(array $categories): array {
         $sorted = [];
@@ -88,7 +85,6 @@ class WC1C_Product_Sync {
             $iteration++;
         }
 
-        // Add any remaining (circular references)
         foreach ($remaining as $id => $category) {
             $sorted[$id] = $category;
         }
@@ -97,13 +93,12 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Sync single category
+     * Синхронизация одной категории
      */
     private function sync_single_category(array $category): array {
         $wc_term_id = $this->get_wc_id($category['id'], 'category');
         $parent_id = 0;
 
-        // Get parent term ID
         if (!empty($category['parent_id'])) {
             $parent_id = $this->get_wc_id($category['parent_id'], 'category');
         }
@@ -114,14 +109,12 @@ class WC1C_Product_Sync {
         ];
 
         if ($wc_term_id) {
-            // Update existing
             $result = wp_update_term($wc_term_id, 'product_cat', array_merge(
                 ['name' => $category['name']],
                 $term_data
             ));
             $action = 'updated';
         } else {
-            // Create new
             $result = wp_insert_term($category['name'], 'product_cat', $term_data);
             $action = 'created';
         }
@@ -132,18 +125,17 @@ class WC1C_Product_Sync {
 
         $term_id = is_array($result) ? $result['term_id'] : $result;
         
-        // Save mapping
         $this->save_mapping($category['id'], $term_id, 'category');
 
         return ['action' => $action, 'term_id' => $term_id];
     }
 
     /**
-     * Sync products from 1C
+     * Синхронизация товаров из 1С
      *
-     * @param array $products Parsed products from CommerceML
-     * @param array $offers Parsed offers (prices/stock)
-     * @return array Results
+     * @param array $products Разобранные товары из CommerceML
+     * @param array $offers Разобранные предложения (цены/остатки)
+     * @return array Результаты
      */
     public function sync_products(array $products, array $offers = []): array {
         $results = [
@@ -154,10 +146,10 @@ class WC1C_Product_Sync {
             'errors' => [],
         ];
 
-        // First pass: create/update simple products and variable product parents
+        // Первый проход: простые товары и родители вариативных
         foreach ($products as $product) {
             if ($product['is_variation']) {
-                continue; // Process variations in second pass
+                continue;
             }
 
             try {
@@ -174,16 +166,16 @@ class WC1C_Product_Sync {
             } catch (Exception $e) {
                 $results['failed']++;
                 $results['errors'][] = sprintf(
-                    __('Product "%s" (SKU: %s): %s', 'wc-1c-integration'),
+                    'Товар «%s» (Артикул: %s): %s',
                     $product['name'],
                     $product['sku'],
                     $e->getMessage()
                 );
-                WC1C_Logger::log("Product sync error: {$product['id']} - " . $e->getMessage(), 'error');
+                WC1C_Logger::log("Ошибка синхронизации товара: {$product['id']} - " . $e->getMessage(), 'error');
             }
         }
 
-        // Second pass: create/update variations
+        // Второй проход: вариации
         foreach ($products as $product) {
             if (!$product['is_variation']) {
                 continue;
@@ -201,7 +193,7 @@ class WC1C_Product_Sync {
             } catch (Exception $e) {
                 $results['failed']++;
                 $results['errors'][] = sprintf(
-                    __('Variation "%s": %s', 'wc-1c-integration'),
+                    'Вариация «%s»: %s',
                     $product['name'],
                     $e->getMessage()
                 );
@@ -212,17 +204,15 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Sync single product
+     * Синхронизация одного товара
      */
     private function sync_single_product(array $product_data, array $offer = []): array {
-        // Check if product is marked for deletion
         if ($product_data['status'] === 'deleted') {
             return $this->handle_deleted_product($product_data);
         }
 
         $wc_product_id = $this->get_wc_id($product_data['id'], 'product');
         
-        // Determine if this should be a variable product
         $has_variations = $this->product_has_variations($product_data['id']);
 
         if ($wc_product_id) {
@@ -233,11 +223,9 @@ class WC1C_Product_Sync {
         }
 
         if ($wc_product_id) {
-            // Update existing product
             $wc_product = wc_get_product($wc_product_id);
             $action = 'updated';
         } else {
-            // Create new product
             if ($has_variations) {
                 $wc_product = new WC_Product_Variable();
             } else {
@@ -246,20 +234,16 @@ class WC1C_Product_Sync {
             $action = 'created';
         }
 
-        // Set product data
         $this->set_product_data($wc_product, $product_data, $offer);
 
-        // Save product
         $product_id = $wc_product->save();
 
         if (!$product_id) {
-            throw new Exception(__('Failed to save product', 'wc-1c-integration'));
+            throw new Exception('Не удалось сохранить товар');
         }
 
-        // Save ID mapping
         $this->save_mapping($product_data['id'], $product_id, 'product');
 
-        // Sync images
         if (!empty($product_data['images']) && 'yes' === get_option('wc1c_sync_images', 'yes')) {
             $this->sync_product_images($product_id, $product_data['images']);
         }
@@ -268,14 +252,12 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Set product data
+     * Установка данных товара
      */
     private function set_product_data(WC_Product $product, array $data, array $offer = []): void {
-        // Basic data
         $product->set_name($data['name']);
         
         if (!empty($data['sku'])) {
-            // Check if SKU is unique
             $existing_id = wc_get_product_id_by_sku($data['sku']);
             if (!$existing_id || $existing_id === $product->get_id()) {
                 $product->set_sku($data['sku']);
@@ -290,7 +272,6 @@ class WC1C_Product_Sync {
             $product->set_short_description(wp_trim_words($data['short_description'], 30));
         }
 
-        // Categories
         if (!empty($data['categories'])) {
             $cat_ids = [];
             foreach ($data['categories'] as $cat_1c_id) {
@@ -304,22 +285,18 @@ class WC1C_Product_Sync {
             }
         }
 
-        // Weight
         if (!empty($data['weight'])) {
             $product->set_weight($data['weight']);
         }
 
-        // Attributes
         if (!empty($data['attributes']) && 'yes' === get_option('wc1c_sync_attributes', 'yes')) {
             $this->set_product_attributes($product, $data['attributes']);
         }
 
-        // Prices from offers
         if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
             $this->set_product_prices($product, $offer['prices']);
         }
 
-        // Stock from offers
         if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
             $product->set_manage_stock(true);
             $stock = $offer['total_stock'] ?? 0;
@@ -327,10 +304,8 @@ class WC1C_Product_Sync {
             $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
         }
 
-        // Status
         $product->set_status('publish');
 
-        // Meta data for 1C ID
         $product->update_meta_data('_1c_guid', $data['id']);
         
         if (!empty($data['barcode'])) {
@@ -343,7 +318,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Set product attributes
+     * Установка свойств товара
      */
     private function set_product_attributes(WC_Product $product, array $attributes): void {
         $product_attributes = [];
@@ -352,10 +327,8 @@ class WC1C_Product_Sync {
             $attr_name = wc_sanitize_taxonomy_name($attr['name']);
             $attr_slug = 'pa_' . $attr_name;
 
-            // Create attribute taxonomy if not exists
             $this->maybe_create_attribute_taxonomy($attr_name, $attr['name']);
 
-            // Create/get term
             $term = get_term_by('name', $attr['value'], $attr_slug);
             if (!$term) {
                 $result = wp_insert_term($attr['value'], $attr_slug);
@@ -380,7 +353,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Maybe create attribute taxonomy
+     * Создание таксономии свойств при необходимости
      */
     private function maybe_create_attribute_taxonomy(string $slug, string $name): void {
         if (taxonomy_exists('pa_' . $slug)) {
@@ -397,7 +370,6 @@ class WC1C_Product_Sync {
 
         wc_create_attribute($args);
 
-        // Register the taxonomy for the current request
         register_taxonomy('pa_' . $slug, ['product'], [
             'labels' => [
                 'name' => $name,
@@ -410,12 +382,11 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Set product prices
+     * Установка цен товара
      */
     private function set_product_prices(WC_Product $product, array $prices): void {
         $price_type = get_option('wc1c_price_type', 'Розничная');
         
-        // Find the configured price type
         $selected_price = null;
         foreach ($prices as $price) {
             if ($price['type_name'] === $price_type || empty($price_type)) {
@@ -424,7 +395,6 @@ class WC1C_Product_Sync {
             }
         }
 
-        // Fallback to first price
         if (!$selected_price && !empty($prices)) {
             $selected_price = reset($prices);
         }
@@ -436,18 +406,18 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Sync variation
+     * Синхронизация вариации
      */
     private function sync_variation(array $variation_data, array $offer = []): array {
         $parent_wc_id = $this->get_wc_id($variation_data['parent_id'], 'product');
         
         if (!$parent_wc_id) {
-            throw new Exception(__('Parent product not found', 'wc-1c-integration'));
+            throw new Exception('Родительский товар не найден');
         }
 
         $parent_product = wc_get_product($parent_wc_id);
         if (!$parent_product || !$parent_product->is_type('variable')) {
-            throw new Exception(__('Parent is not a variable product', 'wc-1c-integration'));
+            throw new Exception('Родительский товар не является вариативным');
         }
 
         $variation_id = $this->get_wc_id($variation_data['id'], 'variation');
@@ -468,7 +438,6 @@ class WC1C_Product_Sync {
             $action = 'created';
         }
 
-        // Set variation data
         if (!empty($variation_data['sku'])) {
             $existing_id = wc_get_product_id_by_sku($variation_data['sku']);
             if (!$existing_id || $existing_id === $variation->get_id()) {
@@ -476,25 +445,21 @@ class WC1C_Product_Sync {
             }
         }
 
-        // Set attributes from characteristics
         if (!empty($offer['characteristics'])) {
             $attributes = [];
             foreach ($offer['characteristics'] as $char) {
                 $attr_name = 'pa_' . wc_sanitize_taxonomy_name($char['name']);
                 $attributes[$attr_name] = $char['value'];
                 
-                // Update parent product attributes
                 $this->add_variation_attribute_to_parent($parent_product, $char);
             }
             $variation->set_attributes($attributes);
         }
 
-        // Prices
         if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
             $this->set_product_prices($variation, $offer['prices']);
         }
 
-        // Stock
         if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
             $variation->set_manage_stock(true);
             $stock = $offer['total_stock'] ?? 0;
@@ -507,25 +472,22 @@ class WC1C_Product_Sync {
 
         $var_id = $variation->save();
 
-        // Save mapping
         $this->save_mapping($variation_data['id'], $var_id, 'variation');
 
         return ['action' => $action, 'variation_id' => $var_id];
     }
 
     /**
-     * Add variation attribute to parent product
+     * Добавление атрибута вариации к родительскому товару
      */
     private function add_variation_attribute_to_parent(WC_Product_Variable $parent, array $char): void {
         $attr_slug = 'pa_' . wc_sanitize_taxonomy_name($char['name']);
         
-        // Create attribute taxonomy if needed
         $this->maybe_create_attribute_taxonomy(
             wc_sanitize_taxonomy_name($char['name']),
             $char['name']
         );
 
-        // Get/create term
         $term = get_term_by('name', $char['value'], $attr_slug);
         if (!$term) {
             $result = wp_insert_term($char['value'], $attr_slug);
@@ -538,7 +500,6 @@ class WC1C_Product_Sync {
             return;
         }
 
-        // Update parent attributes
         $attributes = $parent->get_attributes();
         
         if (isset($attributes[$attr_slug])) {
@@ -564,16 +525,14 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Check if product has variations
+     * Проверка наличия вариаций у товара
      */
     private function product_has_variations(string $product_id): bool {
-        // This would need access to all products to check
-        // For now, we'll handle this based on the offers structure
         return false;
     }
 
     /**
-     * Handle deleted product
+     * Обработка удалённого товара
      */
     private function handle_deleted_product(array $product_data): array {
         $wc_product_id = $this->get_wc_id($product_data['id'], 'product');
@@ -590,7 +549,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Sync product images
+     * Синхронизация изображений товара
      */
     private function sync_product_images(int $product_id, array $images): void {
         $upload_dir = wp_upload_dir();
@@ -605,7 +564,6 @@ class WC1C_Product_Sync {
                 continue;
             }
 
-            // Check if image already exists
             $attachment_id = $this->get_attachment_by_1c_path($image_path);
             
             if (!$attachment_id) {
@@ -624,10 +582,8 @@ class WC1C_Product_Sync {
         if (!empty($image_ids)) {
             $product = wc_get_product($product_id);
             if ($product) {
-                // Set featured image
                 $product->set_image_id($image_ids[0]);
                 
-                // Set gallery images
                 if (count($image_ids) > 1) {
                     $product->set_gallery_image_ids(array_slice($image_ids, 1));
                 }
@@ -638,7 +594,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Upload image to media library
+     * Загрузка изображения в медиабиблиотеку
      */
     private function upload_image(string $file_path, int $parent_id = 0): ?int {
         $file_name = basename($file_path);
@@ -651,7 +607,6 @@ class WC1C_Product_Sync {
         $upload_dir = wp_upload_dir();
         $dest_path = $upload_dir['path'] . '/' . $file_name;
 
-        // Copy file to uploads
         if (!copy($file_path, $dest_path)) {
             return null;
         }
@@ -678,7 +633,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Get attachment by 1C path
+     * Получение вложения по пути из 1С
      */
     private function get_attachment_by_1c_path(string $path): ?int {
         global $wpdb;
@@ -692,7 +647,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Update only prices and stock
+     * Обновление только цен и остатков
      */
     public function update_offers(array $offers): array {
         $results = [
@@ -722,12 +677,10 @@ class WC1C_Product_Sync {
                     continue;
                 }
 
-                // Update prices
                 if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
                     $this->set_product_prices($product, $offer['prices']);
                 }
 
-                // Update stock
                 if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
                     $stock = $offer['total_stock'] ?? 0;
                     $product->set_stock_quantity($stock);
@@ -740,7 +693,7 @@ class WC1C_Product_Sync {
             } catch (Exception $e) {
                 $results['failed']++;
                 $results['errors'][] = sprintf(
-                    __('Offer %s: %s', 'wc-1c-integration'),
+                    'Предложение %s: %s',
                     $offer['id'],
                     $e->getMessage()
                 );
@@ -751,7 +704,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Get WooCommerce ID by 1C GUID
+     * Получение ID WooCommerce по GUID из 1С
      */
     public function get_wc_id(string $guid, string $type = 'product'): ?int {
         global $wpdb;
@@ -766,7 +719,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Save ID mapping
+     * Сохранение связи ID
      */
     public function save_mapping(string $guid, int $wc_id, string $type = 'product'): void {
         global $wpdb;
@@ -783,7 +736,7 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Get 1C GUID by WooCommerce ID
+     * Получение GUID 1С по ID WooCommerce
      */
     public function get_1c_guid(int $wc_id, string $type = 'product'): ?string {
         global $wpdb;

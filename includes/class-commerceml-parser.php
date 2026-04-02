@@ -1,6 +1,6 @@
 <?php
 /**
- * CommerceML Parser
+ * Парсер CommerceML
  *
  * Парсер формата CommerceML 2.x для обмена данными с 1С
  *
@@ -10,70 +10,54 @@
 defined('ABSPATH') || exit;
 
 /**
- * CommerceML Parser class
+ * Класс парсера CommerceML
  */
 class WC1C_CommerceML_Parser {
 
-    /**
-     * Current XML file path
-     */
+    /** @var string Путь к текущему XML-файлу */
     private string $file_path = '';
 
-    /**
-     * Parsed catalog data
-     */
+    /** @var array Данные каталога */
     private array $catalog = [];
 
-    /**
-     * Parsed offers data
-     */
+    /** @var array Данные предложений */
     private array $offers = [];
 
-    /**
-     * Parsed categories
-     */
+    /** @var array Разобранные категории */
     private array $categories = [];
 
-    /**
-     * Parsed properties (attributes)
-     */
+    /** @var array Разобранные свойства (атрибуты) */
     private array $properties = [];
 
-    /**
-     * Price types
-     */
+    /** @var array Типы цен */
     private array $price_types = [];
 
-    /**
-     * Warehouses
-     */
+    /** @var array Склады */
     private array $warehouses = [];
 
     /**
-     * Parse import.xml (catalog structure)
+     * Разбор import.xml (структура каталога)
      *
-     * @param string $file_path Path to import.xml
-     * @return array Parsed data
+     * @param string $file_path Путь к import.xml
+     * @return array Разобранные данные
      */
     public function parse_import(string $file_path): array {
         $this->file_path = $file_path;
         
         if (!file_exists($file_path)) {
-            throw new Exception(__('Import file not found', 'wc-1c-integration'));
+            throw new Exception('Файл импорта не найден');
         }
 
         $xml = $this->load_xml($file_path);
         
         if (!$xml) {
-            throw new Exception(__('Failed to parse XML file', 'wc-1c-integration'));
+            throw new Exception('Не удалось разобрать XML-файл');
         }
 
-        // Parse classifier (categories, properties)
         if (isset($xml->Классификатор)) {
             $this->parse_classifier($xml->Классификатор);
         }
 
-        // Parse catalog (products)
         if (isset($xml->Каталог)) {
             $this->parse_catalog($xml->Каталог);
         }
@@ -86,29 +70,27 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Parse offers.xml (prices and stock)
+     * Разбор offers.xml (цены и остатки)
      *
-     * @param string $file_path Path to offers.xml
-     * @return array Parsed offers data
+     * @param string $file_path Путь к offers.xml
+     * @return array Разобранные данные предложений
      */
     public function parse_offers(string $file_path): array {
         $this->file_path = $file_path;
         
         if (!file_exists($file_path)) {
-            throw new Exception(__('Offers file not found', 'wc-1c-integration'));
+            throw new Exception('Файл предложений не найден');
         }
 
         $xml = $this->load_xml($file_path);
         
         if (!$xml) {
-            throw new Exception(__('Failed to parse offers XML', 'wc-1c-integration'));
+            throw new Exception('Не удалось разобрать XML предложений');
         }
 
-        // Parse package offers
         if (isset($xml->ПакетПредложений)) {
             $package = $xml->ПакетПредложений;
             
-            // Parse price types
             if (isset($package->ТипыЦен->ТипЦены)) {
                 foreach ($package->ТипыЦен->ТипЦены as $price_type) {
                     $this->price_types[(string)$price_type->Ид] = [
@@ -119,7 +101,6 @@ class WC1C_CommerceML_Parser {
                 }
             }
 
-            // Parse warehouses
             if (isset($package->Склады->Склад)) {
                 foreach ($package->Склады->Склад as $warehouse) {
                     $this->warehouses[(string)$warehouse->Ид] = [
@@ -129,7 +110,6 @@ class WC1C_CommerceML_Parser {
                 }
             }
 
-            // Parse offers
             if (isset($package->Предложения->Предложение)) {
                 foreach ($package->Предложения->Предложение as $offer) {
                     $this->parse_offer($offer);
@@ -145,9 +125,9 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Load XML file with proper encoding handling
+     * Загрузка XML-файла с обработкой кодировки
      *
-     * @param string $file_path Path to XML file
+     * @param string $file_path Путь к XML-файлу
      * @return SimpleXMLElement|false
      */
     private function load_xml(string $file_path) {
@@ -155,7 +135,6 @@ class WC1C_CommerceML_Parser {
         
         $content = file_get_contents($file_path);
         
-        // Handle different encodings
         if (preg_match('/encoding=["\']?([^"\'\s\?>]+)/i', $content, $matches)) {
             $encoding = strtoupper($matches[1]);
             if ($encoding !== 'UTF-8') {
@@ -169,7 +148,7 @@ class WC1C_CommerceML_Parser {
         if (!$xml) {
             $errors = libxml_get_errors();
             libxml_clear_errors();
-            WC1C_Logger::log('XML parse errors: ' . print_r($errors, true), 'error');
+            WC1C_Logger::log('Ошибки разбора XML: ' . print_r($errors, true), 'error');
             return false;
         }
 
@@ -177,17 +156,15 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Parse classifier section (categories, properties)
+     * Разбор раздела классификатора (категории, свойства)
      *
-     * @param SimpleXMLElement $classifier Classifier XML element
+     * @param SimpleXMLElement $classifier XML-элемент классификатора
      */
     private function parse_classifier(SimpleXMLElement $classifier): void {
-        // Parse categories (groups)
         if (isset($classifier->Группы)) {
             $this->parse_categories($classifier->Группы->Группа ?? []);
         }
 
-        // Parse properties (attributes)
         if (isset($classifier->Свойства->Свойство)) {
             foreach ($classifier->Свойства->Свойство as $property) {
                 $prop_id = (string)$property->Ид;
@@ -199,7 +176,6 @@ class WC1C_CommerceML_Parser {
                     'values' => [],
                 ];
 
-                // Parse predefined values
                 if (isset($property->ВариантыЗначений->Справочник)) {
                     foreach ($property->ВариантыЗначений->Справочник as $value) {
                         $value_id = (string)$value->ИдЗначения;
@@ -211,10 +187,10 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Parse categories recursively
+     * Рекурсивный разбор категорий
      *
-     * @param SimpleXMLElement|array $groups Groups XML elements
-     * @param string $parent_id Parent category ID
+     * @param SimpleXMLElement|array $groups XML-элементы групп
+     * @param string $parent_id ID родительской категории
      */
     private function parse_categories($groups, string $parent_id = ''): void {
         foreach ($groups as $group) {
@@ -227,7 +203,6 @@ class WC1C_CommerceML_Parser {
                 'description' => (string)($group->Описание ?? ''),
             ];
 
-            // Parse nested categories
             if (isset($group->Группы->Группа)) {
                 $this->parse_categories($group->Группы->Группа, $id);
             }
@@ -235,9 +210,9 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Parse catalog section (products)
+     * Разбор раздела каталога (товары)
      *
-     * @param SimpleXMLElement $catalog Catalog XML element
+     * @param SimpleXMLElement $catalog XML-элемент каталога
      */
     private function parse_catalog(SimpleXMLElement $catalog): void {
         if (!isset($catalog->Товары->Товар)) {
@@ -250,14 +225,13 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Parse single product
+     * Разбор одного товара
      *
-     * @param SimpleXMLElement $product Product XML element
+     * @param SimpleXMLElement $product XML-элемент товара
      */
     private function parse_product(SimpleXMLElement $product): void {
         $id = (string)$product->Ид;
         
-        // Check if this is a variation (contains #)
         $is_variation = strpos($id, '#') !== false;
         $parent_id = $is_variation ? explode('#', $id)[0] : '';
 
@@ -277,14 +251,12 @@ class WC1C_CommerceML_Parser {
             'status' => 'active',
         ];
 
-        // Parse categories
         if (isset($product->Группы->Ид)) {
             foreach ($product->Группы->Ид as $cat_id) {
                 $product_data['categories'][] = (string)$cat_id;
             }
         }
 
-        // Parse images
         if (isset($product->Картинка)) {
             foreach ($product->Картинка as $image) {
                 $image_path = (string)$image;
@@ -294,14 +266,12 @@ class WC1C_CommerceML_Parser {
             }
         }
 
-        // Parse properties/attributes
         if (isset($product->ЗначенияСвойств->ЗначенияСвойства)) {
             foreach ($product->ЗначенияСвойств->ЗначенияСвойства as $prop_value) {
                 $prop_id = (string)$prop_value->Ид;
                 $value = (string)$prop_value->Значение;
                 
                 if (!empty($value)) {
-                    // Resolve value from dictionary if exists
                     if (isset($this->properties[$prop_id]['values'][$value])) {
                         $value = $this->properties[$prop_id]['values'][$value];
                     }
@@ -315,7 +285,6 @@ class WC1C_CommerceML_Parser {
             }
         }
 
-        // Parse requisites (additional fields)
         if (isset($product->ЗначенияРеквизитов->ЗначениеРеквизита)) {
             foreach ($product->ЗначенияРеквизитов->ЗначениеРеквизита as $requisite) {
                 $name = (string)$requisite->Наименование;
@@ -344,9 +313,9 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Parse single offer (price/stock)
+     * Разбор одного предложения (цена/остаток)
      *
-     * @param SimpleXMLElement $offer Offer XML element
+     * @param SimpleXMLElement $offer XML-элемент предложения
      */
     private function parse_offer(SimpleXMLElement $offer): void {
         $id = (string)$offer->Ид;
@@ -361,7 +330,6 @@ class WC1C_CommerceML_Parser {
             'characteristics' => [],
         ];
 
-        // Parse prices
         if (isset($offer->Цены->Цена)) {
             foreach ($offer->Цены->Цена as $price) {
                 $price_type_id = (string)$price->ИдТипаЦены;
@@ -377,12 +345,10 @@ class WC1C_CommerceML_Parser {
             }
         }
 
-        // Parse stock (quantity)
         if (isset($offer->Количество)) {
             $offer_data['total_stock'] = floatval((string)$offer->Количество);
         }
 
-        // Parse stock by warehouse
         if (isset($offer->Склад)) {
             foreach ($offer->Склад as $stock) {
                 $attrs = $stock->attributes();
@@ -399,7 +365,6 @@ class WC1C_CommerceML_Parser {
             }
         }
 
-        // Parse characteristics (for variations)
         if (isset($offer->ХарактеристикиТовара->ХарактеристикаТовара)) {
             foreach ($offer->ХарактеристикиТовара->ХарактеристикаТовара as $char) {
                 $offer_data['characteristics'][] = [
@@ -414,16 +379,14 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Clean HTML from description
+     * Очистка HTML из описания
      *
-     * @param string $description Raw description
-     * @return string Cleaned description
+     * @param string $description Исходное описание
+     * @return string Очищенное описание
      */
     private function clean_description(string $description): string {
-        // Decode HTML entities
         $description = html_entity_decode($description, ENT_QUOTES, 'UTF-8');
         
-        // Allow certain HTML tags
         $allowed_tags = '<p><br><strong><b><em><i><ul><ol><li><h2><h3><h4><table><tr><td><th>';
         $description = strip_tags($description, $allowed_tags);
         
@@ -431,10 +394,10 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Generate orders.xml for export to 1C
+     * Генерация orders.xml для выгрузки в 1С
      *
-     * @param array $orders Array of order data
-     * @return string XML content
+     * @param array $orders Массив данных заказов
+     * @return string XML-содержимое
      */
     public function generate_orders_xml(array $orders): string {
         $xml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><КоммерческаяИнформация></КоммерческаяИнформация>');
@@ -455,7 +418,6 @@ class WC1C_CommerceML_Parser {
             $doc->addChild('Курс', '1');
             $doc->addChild('Сумма', $order['total']);
 
-            // Order status mapping
             $status_map = [
                 'pending' => 'Новый',
                 'processing' => 'В обработке',
@@ -468,7 +430,6 @@ class WC1C_CommerceML_Parser {
             
             $doc->addChild('Комментарий', $order['customer_note'] ?? '');
             
-            // Add requisites
             $requisites = $doc->addChild('ЗначенияРеквизитов');
             
             $this->add_requisite($requisites, 'Статус заказа', $status_map[$order['status']] ?? $order['status']);
@@ -477,7 +438,6 @@ class WC1C_CommerceML_Parser {
             $this->add_requisite($requisites, 'Способ доставки', $order['shipping_method'] ?? '');
             $this->add_requisite($requisites, 'Итого по доставке', $order['shipping_total'] ?? '0');
 
-            // Customer info
             $contractors = $doc->addChild('Контрагенты');
             $contractor = $contractors->addChild('Контрагент');
             
@@ -486,7 +446,6 @@ class WC1C_CommerceML_Parser {
             $contractor->addChild('Роль', 'Покупатель');
             $contractor->addChild('ПолноеНаименование', $order['billing']['first_name'] . ' ' . $order['billing']['last_name']);
             
-            // Customer address
             $address = $contractor->addChild('АдресРегистрации');
             $this->add_address_field($address, 'Почтовый индекс', $order['billing']['postcode'] ?? '');
             $this->add_address_field($address, 'Страна', $order['billing']['country'] ?? '');
@@ -494,7 +453,6 @@ class WC1C_CommerceML_Parser {
             $this->add_address_field($address, 'Город', $order['billing']['city'] ?? '');
             $this->add_address_field($address, 'Улица', $order['billing']['address_1'] ?? '');
             
-            // Customer contacts
             $contacts = $contractor->addChild('Контакты');
             if (!empty($order['billing']['email'])) {
                 $contact = $contacts->addChild('Контакт');
@@ -507,7 +465,6 @@ class WC1C_CommerceML_Parser {
                 $contact->addChild('Значение', $order['billing']['phone']);
             }
 
-            // Order items
             $items = $doc->addChild('Товары');
             foreach ($order['items'] as $item) {
                 $product = $items->addChild('Товар');
@@ -523,7 +480,6 @@ class WC1C_CommerceML_Parser {
                 $product->addChild('Количество', $item['quantity']);
                 $product->addChild('Сумма', $item['total']);
                 
-                // Item discounts
                 if (!empty($item['discount'])) {
                     $discounts = $product->addChild('Скидки');
                     $discount = $discounts->addChild('Скидка');
@@ -534,7 +490,6 @@ class WC1C_CommerceML_Parser {
             }
         }
 
-        // Format output
         $dom = new DOMDocument('1.0', 'UTF-8');
         $dom->preserveWhiteSpace = false;
         $dom->formatOutput = true;
@@ -544,7 +499,7 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Add requisite to XML
+     * Добавление реквизита в XML
      */
     private function add_requisite(SimpleXMLElement $parent, string $name, string $value): void {
         $req = $parent->addChild('ЗначениеРеквизита');
@@ -553,7 +508,7 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Add address field to XML
+     * Добавление адресного поля в XML
      */
     private function add_address_field(SimpleXMLElement $parent, string $type, string $value): void {
         if (empty($value)) {
@@ -565,28 +520,28 @@ class WC1C_CommerceML_Parser {
     }
 
     /**
-     * Get parsed categories
+     * Получить разобранные категории
      */
     public function get_categories(): array {
         return $this->categories;
     }
 
     /**
-     * Get parsed properties
+     * Получить разобранные свойства
      */
     public function get_properties(): array {
         return $this->properties;
     }
 
     /**
-     * Get parsed products
+     * Получить разобранные товары
      */
     public function get_products(): array {
         return $this->catalog;
     }
 
     /**
-     * Get parsed offers
+     * Получить разобранные предложения
      */
     public function get_offers(): array {
         return $this->offers;

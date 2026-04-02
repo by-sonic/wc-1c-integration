@@ -1,6 +1,6 @@
 <?php
 /**
- * Order Sync
+ * Синхронизация заказов
  *
  * Экспорт заказов из WooCommerce в 1С
  *
@@ -10,23 +10,22 @@
 defined('ABSPATH') || exit;
 
 /**
- * Order Sync class
+ * Класс синхронизации заказов
  */
 class WC1C_Order_Sync {
 
     /**
-     * Constructor
+     * Конструктор
      */
     public function __construct() {
-        // Hook for order status changes
         add_action('woocommerce_order_status_changed', [$this, 'on_order_status_changed'], 10, 4);
     }
 
     /**
-     * Get orders for export to 1C
+     * Получение заказов для выгрузки в 1С
      *
-     * @param array $args Query arguments
-     * @return array Orders data prepared for CommerceML export
+     * @param array $args Параметры запроса
+     * @return array Данные заказов, подготовленные для выгрузки в CommerceML
      */
     public function get_orders_for_export(array $args = []): array {
         $defaults = [
@@ -64,10 +63,10 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Prepare single order for export
+     * Подготовка одного заказа к выгрузке
      *
-     * @param WC_Order $order Order object
-     * @return array Order data in CommerceML format
+     * @param WC_Order $order Объект заказа
+     * @return array Данные заказа в формате CommerceML
      */
     public function prepare_order_for_export(WC_Order $order): array {
         $order_data = [
@@ -93,7 +92,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Generate GUID for order
+     * Генерация GUID для заказа
      */
     private function generate_order_guid(WC_Order $order): string {
         $existing_guid = $order->get_meta('_wc1c_order_guid');
@@ -102,7 +101,6 @@ class WC1C_Order_Sync {
             return $existing_guid;
         }
 
-        // Generate new GUID (v4 UUID via CSPRNG)
         $guid = sprintf(
             '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
             random_int(0, 0xffff), random_int(0, 0xffff),
@@ -119,13 +117,12 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Get customer GUID
+     * Получение GUID покупателя
      */
     private function get_customer_guid(WC_Order $order): string {
         $customer_id = $order->get_customer_id();
         
         if (!$customer_id) {
-            // Guest customer - generate based on email
             $email = $order->get_billing_email();
             return md5('guest_' . $email);
         }
@@ -148,7 +145,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Get billing data
+     * Получение данных плательщика
      */
     private function get_billing_data(WC_Order $order): array {
         return [
@@ -167,7 +164,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Get shipping data
+     * Получение данных доставки
      */
     private function get_shipping_data(WC_Order $order): array {
         return [
@@ -184,7 +181,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Get shipping method title
+     * Получение названия способа доставки
      */
     private function get_shipping_method_title(WC_Order $order): string {
         $shipping_methods = $order->get_shipping_methods();
@@ -198,7 +195,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Get order items
+     * Получение позиций заказа
      */
     private function get_order_items(WC_Order $order): array {
         $items = [];
@@ -208,7 +205,6 @@ class WC1C_Order_Sync {
             $product_id = $item->get_product_id();
             $variation_id = $item->get_variation_id();
             
-            // Get 1C GUID
             $product_1c_id = '';
             if ($product) {
                 $product_1c_id = $product->get_meta('_1c_guid');
@@ -228,7 +224,6 @@ class WC1C_Order_Sync {
                 'discount' => $item->get_subtotal() - $item->get_total(),
             ];
 
-            // Add variation attributes
             if ($variation_id && $product) {
                 $item_data['attributes'] = [];
                 foreach ($product->get_attributes() as $attr_name => $attr_value) {
@@ -246,9 +241,9 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Mark orders as exported
+     * Пометка заказов как выгруженных
      *
-     * @param array $order_ids Order IDs to mark
+     * @param array $order_ids ID заказов для пометки
      */
     public function mark_orders_exported(array $order_ids): void {
         foreach ($order_ids as $order_id) {
@@ -263,15 +258,14 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Handle order status change
+     * Обработка изменения статуса заказа
      *
-     * @param int $order_id Order ID
-     * @param string $old_status Old status
-     * @param string $new_status New status
-     * @param WC_Order $order Order object
+     * @param int $order_id ID заказа
+     * @param string $old_status Старый статус
+     * @param string $new_status Новый статус
+     * @param WC_Order $order Объект заказа
      */
     public function on_order_status_changed(int $order_id, string $old_status, string $new_status, WC_Order $order): void {
-        // Mark for re-export if already exported
         if ($order->get_meta('_wc1c_exported') === '1') {
             $order->update_meta_data('_wc1c_needs_update', '1');
             $order->save();
@@ -279,10 +273,10 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Process order updates from 1C
+     * Обработка обновлений заказов из 1С
      *
-     * @param array $updates Array of order updates from 1C
-     * @return array Results
+     * @param array $updates Массив обновлений заказов из 1С
+     * @return array Результаты
      */
     public function process_order_updates(array $updates): array {
         $results = [
@@ -301,20 +295,17 @@ class WC1C_Order_Sync {
                     continue;
                 }
 
-                // Update order status
                 if (!empty($update['status'])) {
                     $wc_status = $this->map_1c_status_to_wc($update['status']);
                     if ($wc_status && $order->get_status() !== $wc_status) {
-                        $order->update_status($wc_status, __('Status updated from 1C', 'wc-1c-integration'));
+                        $order->update_status($wc_status, 'Статус обновлён из 1С');
                     }
                 }
 
-                // Update tracking number
                 if (!empty($update['tracking_number'])) {
                     $order->update_meta_data('_tracking_number', $update['tracking_number']);
                 }
 
-                // Update 1C document number
                 if (!empty($update['1c_document_number'])) {
                     $order->update_meta_data('_1c_document_number', $update['1c_document_number']);
                 }
@@ -325,7 +316,7 @@ class WC1C_Order_Sync {
             } catch (Exception $e) {
                 $results['failed']++;
                 $results['errors'][] = sprintf(
-                    __('Order %s: %s', 'wc-1c-integration'),
+                    'Заказ %s: %s',
                     $update['id'],
                     $e->getMessage()
                 );
@@ -336,7 +327,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Find order by 1C GUID (HPOS-compatible meta_query)
+     * Поиск заказа по GUID из 1С (совместим с HPOS)
      */
     private function find_order_by_guid(string $guid): ?WC_Order {
         $orders = wc_get_orders([
@@ -353,7 +344,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Map 1C status to WooCommerce status
+     * Маппинг статусов 1С в статусы WooCommerce
      */
     private function map_1c_status_to_wc(string $status_1c): string {
         $status_map = [
@@ -372,10 +363,10 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Export orders to XML
+     * Выгрузка заказов в XML
      *
-     * @param array $args Query arguments
-     * @return string XML content
+     * @param array $args Параметры запроса
+     * @return string XML-содержимое
      */
     public function export_orders_xml(array $args = []): string {
         $orders = $this->get_orders_for_export($args);
@@ -385,7 +376,7 @@ class WC1C_Order_Sync {
     }
 
     /**
-     * Get export statistics (HPOS-compatible)
+     * Получение статистики выгрузки (совместимо с HPOS)
      */
     public function get_export_stats(): array {
         global $wpdb;

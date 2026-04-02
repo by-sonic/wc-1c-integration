@@ -1,6 +1,6 @@
 <?php
 /**
- * Logger
+ * Логирование
  *
  * Логирование операций плагина
  *
@@ -10,28 +10,24 @@
 defined('ABSPATH') || exit;
 
 /**
- * Logger class
+ * Класс логирования
  */
 class WC1C_Logger {
 
-    /**
-     * Log file path
-     */
+    /** @var string|null Путь к файлу журнала */
     private static ?string $log_file = null;
 
     /**
-     * Log a message
+     * Записать сообщение в журнал
      *
-     * @param string $message Message to log
-     * @param string $level Log level (info, warning, error, debug)
+     * @param string $message Сообщение для записи
+     * @param string $level Уровень (info, warning, error, debug)
      */
     public static function log(string $message, string $level = 'info'): void {
-        // Check if debug mode is enabled
         if ($level === 'debug' && 'yes' !== get_option('wc1c_debug_mode', 'no')) {
             return;
         }
 
-        // Use WooCommerce logger if available
         if (function_exists('wc_get_logger')) {
             $logger = wc_get_logger();
             $context = ['source' => 'wc-1c-integration'];
@@ -51,12 +47,11 @@ class WC1C_Logger {
             }
         }
 
-        // Also log to custom file for easier access
         self::write_to_file($message, $level);
     }
 
     /**
-     * Write message to log file
+     * Запись сообщения в файл журнала
      */
     private static function write_to_file(string $message, string $level): void {
         if (null === self::$log_file) {
@@ -73,7 +68,6 @@ class WC1C_Logger {
         $level_upper = strtoupper($level);
         $log_entry = "[{$timestamp}] [{$level_upper}] {$message}\n";
 
-        // Rotate log if too large (> 5MB)
         if (file_exists(self::$log_file) && filesize(self::$log_file) > 5 * 1024 * 1024) {
             self::rotate_log();
         }
@@ -82,14 +76,13 @@ class WC1C_Logger {
     }
 
     /**
-     * Rotate log file
+     * Ротация файла журнала
      */
     private static function rotate_log(): void {
         if (file_exists(self::$log_file)) {
             $backup = self::$log_file . '.' . date('Y-m-d-H-i-s');
             rename(self::$log_file, $backup);
 
-            // Keep only last 5 backup files
             $dir = dirname(self::$log_file);
             $files = glob($dir . '/debug.log.*');
             
@@ -107,10 +100,10 @@ class WC1C_Logger {
     }
 
     /**
-     * Get log contents
+     * Получение содержимого журнала
      *
-     * @param int $lines Number of lines to return
-     * @return string Log contents
+     * @param int $lines Количество строк
+     * @return string Содержимое журнала
      */
     public static function get_log(int $lines = 100): string {
         if (null === self::$log_file) {
@@ -141,7 +134,7 @@ class WC1C_Logger {
     }
 
     /**
-     * Clear log file
+     * Очистка файла журнала
      */
     public static function clear_log(): void {
         if (null === self::$log_file) {
@@ -155,7 +148,7 @@ class WC1C_Logger {
     }
 
     /**
-     * Log sync statistics
+     * Запись статистики синхронизации
      */
     public static function log_sync_stats(string $operation, array $stats): void {
         $parts = [];
@@ -166,6 +159,6 @@ class WC1C_Logger {
             $parts[] = "{$key}: {$value}";
         }
 
-        self::log("{$operation} completed - " . implode(', ', $parts), 'info');
+        self::log("{$operation} завершено — " . implode(', ', $parts), 'info');
     }
 }

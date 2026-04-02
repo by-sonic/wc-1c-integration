@@ -1,6 +1,6 @@
 <?php
 /**
- * Admin Settings
+ * Настройки администратора
  *
  * Страница настроек плагина в админке WordPress
  *
@@ -32,8 +32,8 @@ class WC1C_Admin_Settings {
     public function add_menu_page(): void {
         add_submenu_page(
             'woocommerce',
-            __('1C Integration', 'wc-1c-integration'),
-            __('1C Integration', 'wc-1c-integration'),
+            'Интеграция с 1С',
+            'Интеграция с 1С',
             'manage_woocommerce',
             'wc-1c-integration',
             [$this, 'render_settings_page']
@@ -44,26 +44,21 @@ class WC1C_Admin_Settings {
      * Register settings
      */
     public function register_settings(): void {
-        // General settings
         register_setting('wc1c_settings', 'wc1c_enabled');
         register_setting('wc1c_settings', 'wc1c_username');
         register_setting('wc1c_settings', 'wc1c_password');
 
-        // Sync settings
         register_setting('wc1c_settings', 'wc1c_sync_images');
         register_setting('wc1c_settings', 'wc1c_sync_categories');
         register_setting('wc1c_settings', 'wc1c_sync_attributes');
         register_setting('wc1c_settings', 'wc1c_sync_stock');
         register_setting('wc1c_settings', 'wc1c_sync_prices');
 
-        // Price and warehouse settings
         register_setting('wc1c_settings', 'wc1c_price_type');
         register_setting('wc1c_settings', 'wc1c_warehouse');
 
-        // Order settings
         register_setting('wc1c_settings', 'wc1c_order_statuses');
 
-        // Debug
         register_setting('wc1c_settings', 'wc1c_debug_mode');
     }
 
@@ -94,11 +89,11 @@ class WC1C_Admin_Settings {
             'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('wc1c_admin_nonce'),
             'strings' => [
-                'testing' => __('Testing...', 'wc-1c-integration'),
-                'syncing' => __('Syncing...', 'wc-1c-integration'),
-                'success' => __('Success!', 'wc-1c-integration'),
-                'error' => __('Error', 'wc-1c-integration'),
-                'confirm_clear' => __('Are you sure you want to clear the log?', 'wc-1c-integration'),
+                'testing' => 'Проверка...',
+                'syncing' => 'Синхронизация...',
+                'success' => 'Успешно!',
+                'error' => 'Ошибка',
+                'confirm_clear' => 'Вы уверены, что хотите очистить журнал?',
             ],
         ]);
     }
@@ -115,23 +110,23 @@ class WC1C_Admin_Settings {
             <nav class="nav-tab-wrapper">
                 <a href="?page=wc-1c-integration&tab=general" 
                    class="nav-tab <?php echo $active_tab === 'general' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('General', 'wc-1c-integration'); ?>
+                    Основные
                 </a>
                 <a href="?page=wc-1c-integration&tab=sync" 
                    class="nav-tab <?php echo $active_tab === 'sync' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('Synchronization', 'wc-1c-integration'); ?>
+                    Синхронизация
                 </a>
                 <a href="?page=wc-1c-integration&tab=orders" 
                    class="nav-tab <?php echo $active_tab === 'orders' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('Orders', 'wc-1c-integration'); ?>
+                    Заказы
                 </a>
                 <a href="?page=wc-1c-integration&tab=logs" 
                    class="nav-tab <?php echo $active_tab === 'logs' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('Logs', 'wc-1c-integration'); ?>
+                    Журнал
                 </a>
                 <a href="?page=wc-1c-integration&tab=status" 
                    class="nav-tab <?php echo $active_tab === 'status' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('Status', 'wc-1c-integration'); ?>
+                    Статус
                 </a>
             </nav>
 
@@ -167,71 +162,71 @@ class WC1C_Admin_Settings {
         <form method="post" action="options.php">
             <?php settings_fields('wc1c_settings'); ?>
 
-            <h2><?php _e('Connection Settings', 'wc-1c-integration'); ?></h2>
+            <h2>Настройки подключения</h2>
             
             <table class="form-table">
                 <tr>
-                    <th scope="row"><?php _e('Enable Exchange', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Включить обмен</th>
                     <td>
                         <label>
                             <input type="checkbox" name="wc1c_enabled" value="yes" 
                                    <?php checked(get_option('wc1c_enabled', 'yes'), 'yes'); ?>>
-                            <?php _e('Enable data exchange with 1C', 'wc-1c-integration'); ?>
+                            Включить обмен данными с 1С
                         </label>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Exchange URL', 'wc-1c-integration'); ?></th>
+                    <th scope="row">URL обмена</th>
                     <td>
                         <code><?php echo esc_html(WC1C_Exchange_Endpoint::get_exchange_url()); ?></code>
                         <p class="description">
-                            <?php _e('Use this URL in 1C exchange settings', 'wc-1c-integration'); ?>
+                            Используйте этот URL в настройках обмена 1С
                         </p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Username', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Имя пользователя</th>
                     <td>
                         <input type="text" name="wc1c_username" 
                                value="<?php echo esc_attr(get_option('wc1c_username', '')); ?>" 
                                class="regular-text">
                         <p class="description">
-                            <?php _e('Username for 1C authentication', 'wc-1c-integration'); ?>
+                            Имя пользователя для авторизации 1С
                         </p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Password', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Пароль</th>
                     <td>
                         <input type="password" name="wc1c_password" 
                                value="<?php echo esc_attr(get_option('wc1c_password', '')); ?>" 
                                class="regular-text">
                         <p class="description">
-                            <?php _e('Password for 1C authentication', 'wc-1c-integration'); ?>
+                            Пароль для авторизации 1С
                         </p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Debug Mode', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Режим отладки</th>
                     <td>
                         <label>
                             <input type="checkbox" name="wc1c_debug_mode" value="yes" 
                                    <?php checked(get_option('wc1c_debug_mode', 'no'), 'yes'); ?>>
-                            <?php _e('Enable detailed logging', 'wc-1c-integration'); ?>
+                            Включить подробное логирование
                         </label>
                     </td>
                 </tr>
             </table>
 
-            <h2><?php _e('Test Connection', 'wc-1c-integration'); ?></h2>
+            <h2>Проверка подключения</h2>
             <p>
                 <button type="button" class="button" id="wc1c-test-connection">
-                    <?php _e('Test Connection', 'wc-1c-integration'); ?>
+                    Проверить подключение
                 </button>
                 <span id="wc1c-test-result"></span>
             </p>
 
-            <?php submit_button(); ?>
+            <?php submit_button('Сохранить настройки'); ?>
         </form>
         <?php
     }
@@ -244,89 +239,89 @@ class WC1C_Admin_Settings {
         <form method="post" action="options.php">
             <?php settings_fields('wc1c_settings'); ?>
 
-            <h2><?php _e('Catalog Synchronization', 'wc-1c-integration'); ?></h2>
+            <h2>Синхронизация каталога</h2>
             
             <table class="form-table">
                 <tr>
-                    <th scope="row"><?php _e('Sync Categories', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Синхронизация категорий</th>
                     <td>
                         <label>
                             <input type="checkbox" name="wc1c_sync_categories" value="yes" 
                                    <?php checked(get_option('wc1c_sync_categories', 'yes'), 'yes'); ?>>
-                            <?php _e('Import categories from 1C', 'wc-1c-integration'); ?>
+                            Импортировать категории из 1С
                         </label>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Sync Attributes', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Синхронизация свойств</th>
                     <td>
                         <label>
                             <input type="checkbox" name="wc1c_sync_attributes" value="yes" 
                                    <?php checked(get_option('wc1c_sync_attributes', 'yes'), 'yes'); ?>>
-                            <?php _e('Import product attributes from 1C', 'wc-1c-integration'); ?>
+                            Импортировать свойства товаров из 1С
                         </label>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Sync Images', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Синхронизация изображений</th>
                     <td>
                         <label>
                             <input type="checkbox" name="wc1c_sync_images" value="yes" 
                                    <?php checked(get_option('wc1c_sync_images', 'yes'), 'yes'); ?>>
-                            <?php _e('Import product images from 1C', 'wc-1c-integration'); ?>
+                            Импортировать изображения товаров из 1С
                         </label>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Sync Prices', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Синхронизация цен</th>
                     <td>
                         <label>
                             <input type="checkbox" name="wc1c_sync_prices" value="yes" 
                                    <?php checked(get_option('wc1c_sync_prices', 'yes'), 'yes'); ?>>
-                            <?php _e('Update prices from 1C', 'wc-1c-integration'); ?>
+                            Обновлять цены из 1С
                         </label>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Sync Stock', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Синхронизация остатков</th>
                     <td>
                         <label>
                             <input type="checkbox" name="wc1c_sync_stock" value="yes" 
                                    <?php checked(get_option('wc1c_sync_stock', 'yes'), 'yes'); ?>>
-                            <?php _e('Update stock quantities from 1C', 'wc-1c-integration'); ?>
+                            Обновлять остатки из 1С
                         </label>
                     </td>
                 </tr>
             </table>
 
-            <h2><?php _e('Price Settings', 'wc-1c-integration'); ?></h2>
+            <h2>Настройки цен</h2>
             
             <table class="form-table">
                 <tr>
-                    <th scope="row"><?php _e('Price Type', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Тип цены</th>
                     <td>
                         <input type="text" name="wc1c_price_type" 
                                value="<?php echo esc_attr(get_option('wc1c_price_type', 'Розничная')); ?>" 
                                class="regular-text">
                         <p class="description">
-                            <?php _e('Name of price type from 1C to use (e.g., "Розничная", "Оптовая")', 'wc-1c-integration'); ?>
+                            Наименование типа цен из 1С (например, «Розничная», «Оптовая»)
                         </p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><?php _e('Warehouse', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Склад</th>
                     <td>
                         <input type="text" name="wc1c_warehouse" 
                                value="<?php echo esc_attr(get_option('wc1c_warehouse', '')); ?>" 
                                class="regular-text">
                         <p class="description">
-                            <?php _e('Warehouse name to use for stock (leave empty for all warehouses)', 'wc-1c-integration'); ?>
+                            Наименование склада для остатков (оставьте пустым для всех складов)
                         </p>
                     </td>
                 </tr>
             </table>
 
-            <?php submit_button(); ?>
+            <?php submit_button('Сохранить настройки'); ?>
         </form>
         <?php
     }
@@ -345,11 +340,11 @@ class WC1C_Admin_Settings {
         <form method="post" action="options.php">
             <?php settings_fields('wc1c_settings'); ?>
 
-            <h2><?php _e('Order Export Settings', 'wc-1c-integration'); ?></h2>
+            <h2>Настройки выгрузки заказов</h2>
             
             <table class="form-table">
                 <tr>
-                    <th scope="row"><?php _e('Export Order Statuses', 'wc-1c-integration'); ?></th>
+                    <th scope="row">Статусы для выгрузки</th>
                     <td>
                         <?php foreach ($order_statuses as $status => $label): ?>
                             <label style="display: block; margin-bottom: 5px;">
@@ -360,36 +355,36 @@ class WC1C_Admin_Settings {
                             </label>
                         <?php endforeach; ?>
                         <p class="description">
-                            <?php _e('Orders with these statuses will be exported to 1C', 'wc-1c-integration'); ?>
+                            Заказы с выбранными статусами будут выгружены в 1С
                         </p>
                     </td>
                 </tr>
             </table>
 
-            <h2><?php _e('Export Statistics', 'wc-1c-integration'); ?></h2>
+            <h2>Статистика выгрузки</h2>
             <?php
             $stats = wc1c()->order_sync->get_export_stats();
             ?>
             <table class="widefat" style="max-width: 400px;">
                 <tr>
-                    <td><?php _e('Total Orders', 'wc-1c-integration'); ?></td>
+                    <td>Всего заказов</td>
                     <td><strong><?php echo esc_html($stats['total_orders']); ?></strong></td>
                 </tr>
                 <tr>
-                    <td><?php _e('Exported', 'wc-1c-integration'); ?></td>
+                    <td>Выгружено</td>
                     <td><strong><?php echo esc_html($stats['exported']); ?></strong></td>
                 </tr>
                 <tr>
-                    <td><?php _e('Pending Export', 'wc-1c-integration'); ?></td>
+                    <td>Ожидают выгрузки</td>
                     <td><strong><?php echo esc_html($stats['pending_export']); ?></strong></td>
                 </tr>
                 <tr>
-                    <td><?php _e('Needs Update', 'wc-1c-integration'); ?></td>
+                    <td>Требуют обновления</td>
                     <td><strong><?php echo esc_html($stats['needs_update']); ?></strong></td>
                 </tr>
             </table>
 
-            <?php submit_button(); ?>
+            <?php submit_button('Сохранить настройки'); ?>
         </form>
         <?php
     }
@@ -400,14 +395,14 @@ class WC1C_Admin_Settings {
     private function render_logs_tab(): void {
         $log = WC1C_Logger::get_log(200);
         ?>
-        <h2><?php _e('Exchange Log', 'wc-1c-integration'); ?></h2>
+        <h2>Журнал обмена</h2>
         
         <p>
             <button type="button" class="button" id="wc1c-refresh-log">
-                <?php _e('Refresh', 'wc-1c-integration'); ?>
+                Обновить
             </button>
             <button type="button" class="button" id="wc1c-clear-log">
-                <?php _e('Clear Log', 'wc-1c-integration'); ?>
+                Очистить журнал
             </button>
         </p>
 
@@ -428,56 +423,56 @@ class WC1C_Admin_Settings {
             "SELECT * FROM {$wpdb->prefix}wc1c_sync_log ORDER BY id DESC LIMIT 20"
         );
         ?>
-        <h2><?php _e('System Status', 'wc-1c-integration'); ?></h2>
+        <h2>Состояние системы</h2>
         
         <table class="widefat" style="max-width: 600px;">
             <tr>
-                <td><?php _e('Plugin Version', 'wc-1c-integration'); ?></td>
+                <td>Версия плагина</td>
                 <td><strong><?php echo esc_html(WC1C_VERSION); ?></strong></td>
             </tr>
             <tr>
-                <td><?php _e('WooCommerce Version', 'wc-1c-integration'); ?></td>
+                <td>Версия WooCommerce</td>
                 <td><strong><?php echo esc_html(WC()->version); ?></strong></td>
             </tr>
             <tr>
-                <td><?php _e('PHP Version', 'wc-1c-integration'); ?></td>
+                <td>Версия PHP</td>
                 <td><strong><?php echo esc_html(PHP_VERSION); ?></strong></td>
             </tr>
             <tr>
-                <td><?php _e('Exchange URL', 'wc-1c-integration'); ?></td>
+                <td>URL обмена</td>
                 <td><code><?php echo esc_html(WC1C_Exchange_Endpoint::get_exchange_url()); ?></code></td>
             </tr>
             <tr>
-                <td><?php _e('ID Mappings', 'wc-1c-integration'); ?></td>
+                <td>Связей ID</td>
                 <td><strong><?php echo esc_html($mapping_count); ?></strong></td>
             </tr>
             <tr>
-                <td><?php _e('Max Upload Size', 'wc-1c-integration'); ?></td>
+                <td>Макс. размер загрузки</td>
                 <td><strong><?php echo esc_html(size_format(wp_max_upload_size())); ?></strong></td>
             </tr>
             <tr>
-                <td><?php _e('Memory Limit', 'wc-1c-integration'); ?></td>
+                <td>Лимит памяти</td>
                 <td><strong><?php echo esc_html(ini_get('memory_limit')); ?></strong></td>
             </tr>
             <tr>
-                <td><?php _e('Max Execution Time', 'wc-1c-integration'); ?></td>
-                <td><strong><?php echo esc_html(ini_get('max_execution_time')); ?>s</strong></td>
+                <td>Макс. время выполнения</td>
+                <td><strong><?php echo esc_html(ini_get('max_execution_time')); ?>с</strong></td>
             </tr>
         </table>
 
-        <h2><?php _e('Recent Sync Operations', 'wc-1c-integration'); ?></h2>
+        <h2>Последние операции синхронизации</h2>
         
         <?php if (empty($sync_log)): ?>
-            <p><?php _e('No sync operations recorded yet.', 'wc-1c-integration'); ?></p>
+            <p>Операций синхронизации пока не было.</p>
         <?php else: ?>
             <table class="widefat">
                 <thead>
                     <tr>
-                        <th><?php _e('Type', 'wc-1c-integration'); ?></th>
-                        <th><?php _e('Direction', 'wc-1c-integration'); ?></th>
-                        <th><?php _e('Status', 'wc-1c-integration'); ?></th>
-                        <th><?php _e('Message', 'wc-1c-integration'); ?></th>
-                        <th><?php _e('Date', 'wc-1c-integration'); ?></th>
+                        <th>Тип</th>
+                        <th>Направление</th>
+                        <th>Статус</th>
+                        <th>Сообщение</th>
+                        <th>Дата</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -501,16 +496,15 @@ class WC1C_Admin_Settings {
     }
 
     /**
-     * AJAX: Test connection
+     * AJAX: Проверка подключения
      */
     public function ajax_test_connection(): void {
         check_ajax_referer('wc1c_admin_nonce', 'nonce');
 
         if (!current_user_can('manage_woocommerce')) {
-            wp_send_json_error(__('Permission denied', 'wc-1c-integration'));
+            wp_send_json_error('Доступ запрещён');
         }
 
-        // Check exchange URL accessibility
         $url = WC1C_Exchange_Endpoint::get_exchange_url() . '?type=catalog&mode=checkauth';
         
         $response = wp_remote_get($url, [
@@ -526,23 +520,23 @@ class WC1C_Admin_Settings {
         $code = wp_remote_retrieve_response_code($response);
 
         if ($code === 200 && strpos($body, 'success') !== false) {
-            wp_send_json_success(__('Connection successful!', 'wc-1c-integration'));
+            wp_send_json_success('Подключение успешно!');
         } else {
             wp_send_json_error(sprintf(
-                __('Connection failed. Response code: %d', 'wc-1c-integration'),
+                'Подключение не удалось. Код ответа: %d',
                 $code
             ));
         }
     }
 
     /**
-     * AJAX: Manual sync
+     * AJAX: Ручная синхронизация
      */
     public function ajax_manual_sync(): void {
         check_ajax_referer('wc1c_admin_nonce', 'nonce');
 
         if (!current_user_can('manage_woocommerce')) {
-            wp_send_json_error(__('Permission denied', 'wc-1c-integration'));
+            wp_send_json_error('Доступ запрещён');
         }
 
         $type = isset($_POST['sync_type']) ? sanitize_text_field($_POST['sync_type']) : '';
@@ -552,12 +546,12 @@ class WC1C_Admin_Settings {
                 case 'export_orders':
                     $xml = wc1c()->order_sync->export_orders_xml();
                     wp_send_json_success([
-                        'message' => __('Orders exported successfully', 'wc-1c-integration'),
+                        'message' => 'Заказы выгружены успешно',
                         'count' => substr_count($xml, '<Документ>'),
                     ]);
                     break;
                 default:
-                    wp_send_json_error(__('Unknown sync type', 'wc-1c-integration'));
+                    wp_send_json_error('Неизвестный тип синхронизации');
             }
         } catch (Exception $e) {
             wp_send_json_error($e->getMessage());
@@ -565,17 +559,17 @@ class WC1C_Admin_Settings {
     }
 
     /**
-     * AJAX: Clear log
+     * AJAX: Очистка журнала
      */
     public function ajax_clear_log(): void {
         check_ajax_referer('wc1c_admin_nonce', 'nonce');
 
         if (!current_user_can('manage_woocommerce')) {
-            wp_send_json_error(__('Permission denied', 'wc-1c-integration'));
+            wp_send_json_error('Доступ запрещён');
         }
 
         WC1C_Logger::clear_log();
-        wp_send_json_success(__('Log cleared', 'wc-1c-integration'));
+        wp_send_json_success('Журнал очищен');
     }
 }
 

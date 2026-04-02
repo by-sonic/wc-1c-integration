@@ -1,8 +1,8 @@
 <?php
 /**
- * Exchange Endpoint
+ * Эндпоинт обмена
  *
- * HTTP эндпоинт для обмена данными с 1С по протоколу CommerceML
+ * HTTP-эндпоинт для обмена данными с 1С по протоколу CommerceML
  *
  * @package WC_1C_Integration
  */
@@ -10,31 +10,28 @@
 defined('ABSPATH') || exit;
 
 /**
- * Exchange Endpoint class
+ * Класс эндпоинта обмена
  */
 class WC1C_Exchange_Endpoint {
 
-    /**
-     * Exchange URL slug
-     */
+    /** @var string URL-слаг обмена */
     const ENDPOINT_SLUG = '1c-exchange';
 
-    /**
-     * Session file extension
-     */
+    /** @var string Путь к файлу сессии */
     private string $session_file = '';
 
     /**
-     * Constructor
+     * Конструктор
      */
     public function __construct() {
         add_action('init', [$this, 'add_rewrite_rules']);
         add_filter('query_vars', [$this, 'add_query_vars']);
         add_action('template_redirect', [$this, 'handle_request']);
+        add_action('parse_request', [$this, 'parse_request_fallback']);
     }
 
     /**
-     * Add rewrite rules
+     * Добавление правил перезаписи URL
      */
     public function add_rewrite_rules(): void {
         add_rewrite_rule(
@@ -45,7 +42,7 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Add query vars
+     * Добавление переменных запроса
      */
     public function add_query_vars(array $vars): array {
         $vars[] = 'wc1c_exchange';
@@ -53,32 +50,41 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Handle exchange request
+     * Запасной вариант для окружений без mod_rewrite (Docker, nginx)
+     */
+    public function parse_request_fallback(\WP $wp): void {
+        $request_uri = $_SERVER['REQUEST_URI'] ?? '';
+        $path = trim(parse_url($request_uri, PHP_URL_PATH), '/');
+
+        if ($path === self::ENDPOINT_SLUG && empty($wp->query_vars['wc1c_exchange'])) {
+            $wp->query_vars['wc1c_exchange'] = '1';
+        }
+    }
+
+    /**
+     * Обработка запроса обмена
      */
     public function handle_request(): void {
         if (!get_query_var('wc1c_exchange')) {
             return;
         }
 
-        // Disable caching
         nocache_headers();
 
-        // Check if plugin is enabled
         if ('yes' !== get_option('wc1c_enabled', 'yes')) {
-            $this->send_error(__('Exchange is disabled', 'wc-1c-integration'));
+            $this->send_error('Обмен данными отключён');
         }
 
-        // Authenticate
         if (!$this->authenticate()) {
             header('HTTP/1.1 401 Unauthorized');
             header('WWW-Authenticate: Basic realm="1C Exchange"');
-            $this->send_error(__('Authentication required', 'wc-1c-integration'));
+            $this->send_error('Требуется авторизация');
         }
 
         $type = isset($_GET['type']) ? sanitize_text_field($_GET['type']) : '';
         $mode = isset($_GET['mode']) ? sanitize_text_field($_GET['mode']) : '';
 
-        WC1C_Logger::log("Exchange request: type={$type}, mode={$mode}", 'info');
+        WC1C_Logger::log("Запрос обмена: тип={$type}, режим={$mode}", 'info');
 
         try {
             switch ($type) {
@@ -89,10 +95,10 @@ class WC1C_Exchange_Endpoint {
                     $this->handle_sale($mode);
                     break;
                 default:
-                    $this->send_error(__('Unknown exchange type', 'wc-1c-integration'));
+                    $this->send_error('Неизвестный тип обмена');
             }
         } catch (Exception $e) {
-            WC1C_Logger::log('Exchange error: ' . $e->getMessage(), 'error');
+            WC1C_Logger::log('Ошибка обмена: ' . $e->getMessage(), 'error');
             $this->send_error($e->getMessage());
         }
 
@@ -100,22 +106,19 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Authenticate request
+     * Авторизация запроса
      */
     private function authenticate(): bool {
         $username = get_option('wc1c_username', '');
         $password = get_option('wc1c_password', '');
 
-        // If no credentials set, allow access (not recommended for production)
         if (empty($username) && empty($password)) {
             return true;
         }
 
-        // Get credentials from request
         $auth_user = isset($_SERVER['PHP_AUTH_USER']) ? $_SERVER['PHP_AUTH_USER'] : '';
         $auth_pass = isset($_SERVER['PHP_AUTH_PW']) ? $_SERVER['PHP_AUTH_PW'] : '';
 
-        // Try to get from Authorization header
         if (empty($auth_user) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
             $auth = $_SERVER['HTTP_AUTHORIZATION'];
             if (strpos($auth, 'Basic ') === 0) {
@@ -128,7 +131,7 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Handle catalog exchange
+     * Обработка обмена каталогом
      */
     private function handle_catalog(string $mode): void {
         switch ($mode) {
@@ -145,12 +148,12 @@ class WC1C_Exchange_Endpoint {
                 $this->import_catalog();
                 break;
             default:
-                $this->send_error(__('Unknown catalog mode', 'wc-1c-integration'));
+                $this->send_error('Неизвестный режим каталога');
         }
     }
 
     /**
-     * Handle sale (orders) exchange
+     * Обработка обмена продажами (заказами)
      */
     private function handle_sale(string $mode): void {
         switch ($mode) {
@@ -170,45 +173,40 @@ class WC1C_Exchange_Endpoint {
                 $this->receive_order_file();
                 break;
             default:
-                $this->send_error(__('Unknown sale mode', 'wc-1c-integration'));
+                $this->send_error('Неизвестный режим продаж');
         }
     }
 
     /**
-     * Check authentication
+     * Проверка авторизации
      */
     private function check_auth(): void {
-        // Start session (CSPRNG-based token)
         $session_id = bin2hex(random_bytes(16));
         $upload_dir = wp_upload_dir();
         $this->session_file = $upload_dir['basedir'] . '/wc-1c-exchange/session_' . $session_id;
 
-        // Create session file
         file_put_contents($this->session_file, time());
 
-        // Send success response
         echo "success\n";
         echo "PHPSESSID\n";
         echo $session_id;
     }
 
     /**
-     * Initialize catalog exchange
+     * Инициализация обмена каталогом
      */
     private function init_catalog(): void {
         $upload_dir = wp_upload_dir();
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
 
-        // Clean old files
         $this->clean_exchange_dir($exchange_dir);
 
-        // Send parameters
         echo "zip=no\n";
         echo "file_limit=" . $this->get_file_limit() . "\n";
     }
 
     /**
-     * Initialize sale exchange
+     * Инициализация обмена продажами
      */
     private function init_sale(): void {
         echo "zip=no\n";
@@ -216,24 +214,22 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Receive file from 1C
+     * Приём файла от 1С
      */
     private function receive_file(): void {
         $filename = isset($_GET['filename']) ? sanitize_file_name($_GET['filename']) : '';
         
         if (empty($filename)) {
-            $this->send_error(__('Filename is required', 'wc-1c-integration'));
+            $this->send_error('Имя файла обязательно');
         }
 
         $upload_dir = wp_upload_dir();
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
         
-        // Ensure directory exists
         if (!file_exists($exchange_dir)) {
             wp_mkdir_p($exchange_dir);
         }
 
-        // Handle subdirectories in filename
         $file_path = $exchange_dir . '/' . $filename;
         $file_dir = dirname($file_path);
         
@@ -241,27 +237,25 @@ class WC1C_Exchange_Endpoint {
             wp_mkdir_p($file_dir);
         }
 
-        // Get raw POST data
         $data = file_get_contents('php://input');
         
         if (empty($data)) {
-            $this->send_error(__('No data received', 'wc-1c-integration'));
+            $this->send_error('Данные не получены');
         }
 
-        // Append to file (for chunked uploads)
         $result = file_put_contents($file_path, $data, FILE_APPEND | LOCK_EX);
         
         if ($result === false) {
-            $this->send_error(__('Failed to write file', 'wc-1c-integration'));
+            $this->send_error('Ошибка записи файла');
         }
 
-        WC1C_Logger::log("Received file: {$filename}, size: " . strlen($data), 'info');
+        WC1C_Logger::log("Получен файл: {$filename}, размер: " . strlen($data), 'info');
 
         echo "success\n";
     }
 
     /**
-     * Import catalog from received files
+     * Импорт каталога из полученных файлов
      */
     private function import_catalog(): void {
         $filename = isset($_GET['filename']) ? sanitize_file_name($_GET['filename']) : '';
@@ -269,25 +263,22 @@ class WC1C_Exchange_Endpoint {
         $upload_dir = wp_upload_dir();
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
 
-        // Determine file to process
         if (empty($filename)) {
-            // Find import.xml or offers.xml
             if (file_exists($exchange_dir . '/import.xml')) {
                 $filename = 'import.xml';
             } elseif (file_exists($exchange_dir . '/offers.xml')) {
                 $filename = 'offers.xml';
             } else {
-                $this->send_error(__('No files to import', 'wc-1c-integration'));
+                $this->send_error('Нет файлов для импорта');
             }
         }
 
         $file_path = $exchange_dir . '/' . $filename;
         
         if (!file_exists($file_path)) {
-            $this->send_error(sprintf(__('File not found: %s', 'wc-1c-integration'), $filename));
+            $this->send_error(sprintf('Файл не найден: %s', $filename));
         }
 
-        // Increase limits for import
         @set_time_limit(0);
         @ini_set('memory_limit', '512M');
 
@@ -296,36 +287,31 @@ class WC1C_Exchange_Endpoint {
 
         try {
             if (strpos($filename, 'import') !== false) {
-                // Import catalog structure
                 $data = $parser->parse_import($file_path);
                 
-                // Sync categories
                 if (!empty($data['categories'])) {
                     $cat_results = $product_sync->sync_categories($data['categories']);
-                    WC1C_Logger::log("Categories synced: " . json_encode($cat_results), 'info');
+                    WC1C_Logger::log("Категории синхронизированы: " . json_encode($cat_results), 'info');
                 }
 
-                // Sync products
                 if (!empty($data['products'])) {
                     $prod_results = $product_sync->sync_products($data['products']);
-                    WC1C_Logger::log("Products synced: " . json_encode($prod_results), 'info');
+                    WC1C_Logger::log("Товары синхронизированы: " . json_encode($prod_results), 'info');
                 }
 
                 echo "success\n";
                 
             } elseif (strpos($filename, 'offers') !== false) {
-                // Import prices and stock
                 $data = $parser->parse_offers($file_path);
                 
                 if (!empty($data['offers'])) {
                     $results = $product_sync->update_offers($data['offers']);
-                    WC1C_Logger::log("Offers updated: " . json_encode($results), 'info');
+                    WC1C_Logger::log("Предложения обновлены: " . json_encode($results), 'info');
                 }
 
                 echo "success\n";
                 
             } else {
-                // Try to determine type from content
                 $content = file_get_contents($file_path, false, null, 0, 1000);
                 
                 if (strpos($content, 'Каталог') !== false || strpos($content, 'Классификатор') !== false) {
@@ -349,7 +335,6 @@ class WC1C_Exchange_Endpoint {
                 echo "success\n";
             }
 
-            // Log sync completion
             $this->log_sync('catalog_import', 'incoming', 'success');
 
         } catch (Exception $e) {
@@ -359,15 +344,13 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Export orders to 1C
+     * Выгрузка заказов в 1С
      */
     private function export_orders(): void {
         $order_sync = wc1c()->order_sync;
 
-        // Get orders XML
         $xml = $order_sync->export_orders_xml();
 
-        // Set headers
         header('Content-Type: text/xml; charset=utf-8');
         header('Content-Length: ' . strlen($xml));
 
@@ -377,19 +360,15 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Mark orders as successfully exported
+     * Подтверждение успешной выгрузки заказов
      */
     private function mark_orders_success(): void {
-        // Parse the incoming success confirmation
         $data = file_get_contents('php://input');
         
-        // 1C sends order IDs that were successfully processed
-        // For simplicity, we'll mark all pending orders as exported
         $order_sync = wc1c()->order_sync;
         $orders = $order_sync->get_orders_for_export();
         
         $order_ids = array_map(function($order) {
-            // Extract WC order ID from the prepared data
             return $order['number'];
         }, $orders);
 
@@ -401,7 +380,7 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Receive order updates from 1C
+     * Приём файла обновлений заказов из 1С
      */
     private function receive_order_file(): void {
         $filename = isset($_GET['filename']) ? sanitize_file_name($_GET['filename']) : '';
@@ -410,16 +389,14 @@ class WC1C_Exchange_Endpoint {
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
         $file_path = $exchange_dir . '/' . $filename;
 
-        // Get raw POST data
         $data = file_get_contents('php://input');
         
         if (empty($data)) {
-            $this->send_error(__('No data received', 'wc-1c-integration'));
+            $this->send_error('Данные не получены');
         }
 
         file_put_contents($file_path, $data, FILE_APPEND | LOCK_EX);
 
-        // Process order updates if complete file
         if (strpos($filename, 'orders') !== false && file_exists($file_path)) {
             $this->process_order_updates($file_path);
         }
@@ -428,10 +405,9 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Process order updates from 1C
+     * Обработка обновлений заказов из 1С
      */
     private function process_order_updates(string $file_path): void {
-        // Parse the XML
         $xml = simplexml_load_file($file_path);
         
         if (!$xml) {
@@ -447,7 +423,6 @@ class WC1C_Exchange_Endpoint {
                     'number' => (string)$doc->Номер,
                 ];
 
-                // Extract status from requisites
                 if (isset($doc->ЗначенияРеквизитов->ЗначениеРеквизита)) {
                     foreach ($doc->ЗначенияРеквизитов->ЗначениеРеквизита as $req) {
                         $name = (string)$req->Наименование;
@@ -474,12 +449,12 @@ class WC1C_Exchange_Endpoint {
         if (!empty($updates)) {
             $order_sync = wc1c()->order_sync;
             $results = $order_sync->process_order_updates($updates);
-            WC1C_Logger::log("Order updates processed: " . json_encode($results), 'info');
+            WC1C_Logger::log("Обновления заказов обработаны: " . json_encode($results), 'info');
         }
     }
 
     /**
-     * Clean exchange directory
+     * Очистка директории обмена
      */
     private function clean_exchange_dir(string $dir): void {
         if (!is_dir($dir)) {
@@ -488,7 +463,7 @@ class WC1C_Exchange_Endpoint {
 
         $files = glob($dir . '/*');
         $now = time();
-        $max_age = 3600; // 1 hour
+        $max_age = 3600; // 1 час
 
         foreach ($files as $file) {
             if (is_file($file)) {
@@ -496,14 +471,13 @@ class WC1C_Exchange_Endpoint {
                     @unlink($file);
                 }
             } elseif (is_dir($file)) {
-                // Recursively clean subdirectories
                 $this->clean_exchange_dir($file);
             }
         }
     }
 
     /**
-     * Get file size limit for uploads
+     * Получение лимита размера файла для загрузки
      */
     private function get_file_limit(): int {
         $upload_max = $this->parse_size(ini_get('upload_max_filesize'));
@@ -512,12 +486,11 @@ class WC1C_Exchange_Endpoint {
 
         $limit = min($upload_max, $post_max, $memory / 4);
         
-        // Return at least 1MB, max 100MB
         return max(1024 * 1024, min($limit, 100 * 1024 * 1024));
     }
 
     /**
-     * Parse size string to bytes
+     * Преобразование строки размера в байты
      */
     private function parse_size(string $size): int {
         $unit = strtolower(substr($size, -1));
@@ -539,7 +512,7 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Log sync operation
+     * Запись в журнал синхронизации
      */
     private function log_sync(string $type, string $direction, string $status, string $message = ''): void {
         global $wpdb;
@@ -559,7 +532,7 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Send error response
+     * Отправка ошибки
      */
     private function send_error(string $message): void {
         echo "failure\n";
@@ -568,7 +541,7 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Get exchange URL
+     * Получить URL обмена
      */
     public static function get_exchange_url(): string {
         return home_url('/' . self::ENDPOINT_SLUG . '/');

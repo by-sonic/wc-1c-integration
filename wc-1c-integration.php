@@ -1,11 +1,11 @@
 <?php
 /**
- * Plugin Name: WooCommerce 1C Integration
- * Plugin URI: https://github.com/your-username/wc-1c-integration
+ * Plugin Name: WooCommerce Интеграция с 1С
+ * Plugin URI: https://github.com/by-sonic/wc-1c-integration
  * Description: Полная двусторонняя интеграция WooCommerce с 1С через протокол CommerceML. Синхронизация товаров, цен, остатков и заказов.
  * Version: 1.0.0
- * Author: Your Name
- * Author URI: https://github.com/your-username
+ * Author: by-sonic
+ * Author URI: https://github.com/by-sonic
  * License: GPL-2.0+
  * License URI: http://www.gnu.org/licenses/gpl-2.0.txt
  * Text Domain: wc-1c-integration
@@ -20,7 +20,7 @@
 
 defined('ABSPATH') || exit;
 
-// Plugin constants
+// Константы плагина
 define('WC1C_VERSION', '1.0.0');
 define('WC1C_PLUGIN_FILE', __FILE__);
 define('WC1C_PLUGIN_DIR', plugin_dir_path(__FILE__));
@@ -28,32 +28,24 @@ define('WC1C_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WC1C_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 /**
- * Main plugin class
+ * Главный класс плагина
  */
 final class WC_1C_Integration {
 
-    /**
-     * Single instance
-     */
+    /** @var WC_1C_Integration|null Единственный экземпляр */
     private static ?WC_1C_Integration $instance = null;
 
-    /**
-     * CommerceML parser instance
-     */
+    /** @var WC1C_CommerceML_Parser|null Парсер CommerceML */
     public ?WC1C_CommerceML_Parser $parser = null;
 
-    /**
-     * Product sync instance
-     */
+    /** @var WC1C_Product_Sync|null Синхронизация товаров */
     public ?WC1C_Product_Sync $product_sync = null;
 
-    /**
-     * Order sync instance
-     */
+    /** @var WC1C_Order_Sync|null Синхронизация заказов */
     public ?WC1C_Order_Sync $order_sync = null;
 
     /**
-     * Get single instance
+     * Получить единственный экземпляр
      */
     public static function instance(): WC_1C_Integration {
         if (null === self::$instance) {
@@ -63,84 +55,67 @@ final class WC_1C_Integration {
     }
 
     /**
-     * Constructor
+     * Конструктор
      */
     private function __construct() {
-        $this->check_requirements();
-        $this->includes();
-        $this->init_hooks();
+        add_action('plugins_loaded', [$this, 'on_plugins_loaded']);
+        register_activation_hook(WC1C_PLUGIN_FILE, [$this, 'activate']);
+        register_deactivation_hook(WC1C_PLUGIN_FILE, [$this, 'deactivate']);
     }
 
     /**
-     * Check plugin requirements
+     * Инициализация после загрузки всех плагинов — безопасно проверять WooCommerce
      */
-    private function check_requirements(): void {
+    public function on_plugins_loaded(): void {
+        load_plugin_textdomain(
+            'wc-1c-integration',
+            false,
+            dirname(WC1C_PLUGIN_BASENAME) . '/languages/'
+        );
+
         if (!class_exists('WooCommerce')) {
-            add_action('admin_notices', function() {
+            add_action('admin_notices', function () {
                 echo '<div class="error"><p>';
-                echo esc_html__('WooCommerce 1C Integration requires WooCommerce to be installed and active.', 'wc-1c-integration');
+                echo 'Для работы плагина «Интеграция с 1С» необходим установленный и активированный WooCommerce.';
                 echo '</p></div>';
             });
             return;
         }
+
+        $this->includes();
+        add_action('init', [$this, 'init'], 0);
     }
 
     /**
-     * Include required files
+     * Подключение необходимых файлов
      */
     private function includes(): void {
-        // Core classes
         require_once WC1C_PLUGIN_DIR . 'includes/class-commerceml-parser.php';
         require_once WC1C_PLUGIN_DIR . 'includes/class-product-sync.php';
         require_once WC1C_PLUGIN_DIR . 'includes/class-order-sync.php';
         require_once WC1C_PLUGIN_DIR . 'includes/class-exchange-endpoint.php';
         require_once WC1C_PLUGIN_DIR . 'includes/class-logger.php';
 
-        // Admin classes
         if (is_admin()) {
             require_once WC1C_PLUGIN_DIR . 'includes/admin/class-admin-settings.php';
         }
     }
 
     /**
-     * Initialize hooks
-     */
-    private function init_hooks(): void {
-        add_action('init', [$this, 'init'], 0);
-        add_action('plugins_loaded', [$this, 'load_textdomain']);
-        
-        register_activation_hook(WC1C_PLUGIN_FILE, [$this, 'activate']);
-        register_deactivation_hook(WC1C_PLUGIN_FILE, [$this, 'deactivate']);
-    }
-
-    /**
-     * Initialize plugin
+     * Инициализация компонентов плагина (вызывается на хуке init, после загрузки WooCommerce)
      */
     public function init(): void {
         $this->parser = new WC1C_CommerceML_Parser();
         $this->product_sync = new WC1C_Product_Sync();
         $this->order_sync = new WC1C_Order_Sync();
 
-        // Register exchange endpoint
         new WC1C_Exchange_Endpoint();
     }
 
     /**
-     * Load translations
-     */
-    public function load_textdomain(): void {
-        load_plugin_textdomain(
-            'wc-1c-integration',
-            false,
-            dirname(WC1C_PLUGIN_BASENAME) . '/languages/'
-        );
-    }
-
-    /**
-     * Plugin activation
+     * Активация плагина
      */
     public function activate(): void {
-        // Create exchange directory
         $upload_dir = wp_upload_dir();
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
         
@@ -148,56 +123,48 @@ final class WC_1C_Integration {
             wp_mkdir_p($exchange_dir);
         }
 
-        // Add .htaccess to protect uploads
         $htaccess = $exchange_dir . '/.htaccess';
         if (!file_exists($htaccess)) {
             file_put_contents($htaccess, 'deny from all');
         }
 
-        // Create database tables
         $this->create_tables();
-
-        // Set default options
         $this->set_default_options();
-
-        // Flush rewrite rules
         flush_rewrite_rules();
     }
 
     /**
-     * Plugin deactivation
+     * Деактивация плагина
      */
     public function deactivate(): void {
         flush_rewrite_rules();
     }
 
     /**
-     * Create custom database tables
+     * Создание таблиц в базе данных
      */
     private function create_tables(): void {
         global $wpdb;
         
         $charset_collate = $wpdb->get_charset_collate();
         
-        // Table for mapping 1C IDs to WooCommerce IDs
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
         $table_name = $wpdb->prefix . 'wc1c_id_mapping';
-        
-        $sql = "CREATE TABLE IF NOT EXISTS {$table_name} (
+        dbDelta("CREATE TABLE {$table_name} (
             id bigint(20) NOT NULL AUTO_INCREMENT,
             guid_1c varchar(36) NOT NULL,
             wc_id bigint(20) NOT NULL,
             type varchar(20) NOT NULL DEFAULT 'product',
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
+            PRIMARY KEY  (id),
             UNIQUE KEY guid_type (guid_1c, type),
             KEY wc_id (wc_id)
-        ) {$charset_collate};";
+        ) {$charset_collate};");
 
-        // Table for sync log
         $log_table = $wpdb->prefix . 'wc1c_sync_log';
-        
-        $sql .= "CREATE TABLE IF NOT EXISTS {$log_table} (
+        dbDelta("CREATE TABLE {$log_table} (
             id bigint(20) NOT NULL AUTO_INCREMENT,
             sync_type varchar(50) NOT NULL,
             direction varchar(20) NOT NULL,
@@ -207,17 +174,14 @@ final class WC_1C_Integration {
             items_failed int DEFAULT 0,
             started_at datetime,
             completed_at datetime,
-            PRIMARY KEY (id),
+            PRIMARY KEY  (id),
             KEY sync_type (sync_type),
             KEY status (status)
-        ) {$charset_collate};";
-
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-        dbDelta($sql);
+        ) {$charset_collate};");
     }
 
     /**
-     * Set default plugin options
+     * Установка настроек по умолчанию
      */
     private function set_default_options(): void {
         $defaults = [
@@ -244,7 +208,7 @@ final class WC_1C_Integration {
 }
 
 /**
- * Declare HPOS compatibility (WooCommerce 10.x+)
+ * Объявление совместимости с HPOS (WooCommerce 10.x+)
  */
 add_action('before_woocommerce_init', function () {
     if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
@@ -253,11 +217,11 @@ add_action('before_woocommerce_init', function () {
 });
 
 /**
- * Returns main plugin instance
+ * Возвращает экземпляр плагина
  */
 function wc1c(): WC_1C_Integration {
     return WC_1C_Integration::instance();
 }
 
-// Initialize plugin
+// Инициализация плагина
 wc1c();
