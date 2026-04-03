@@ -201,7 +201,7 @@ class WC1C_Exchange_Endpoint {
         $upload_dir = wp_upload_dir();
         $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
 
-        $this->clean_exchange_dir($exchange_dir);
+        $this->wipe_exchange_dir($exchange_dir);
 
         echo "zip=no\n";
         echo "file_limit=" . $this->get_file_limit() . "\n";
@@ -257,14 +257,7 @@ class WC1C_Exchange_Endpoint {
             $this->send_error('Данные не получены');
         }
 
-        // Первый чанк XML-файла (начинается с <?xml) — перезаписываем, а не дописываем,
-        // иначе повторный обмен склеит два XML-документа и парсинг сломается
-        $flags = FILE_APPEND | LOCK_EX;
-        if (strpos(ltrim($data), '<?xml') === 0) {
-            $flags = LOCK_EX;
-        }
-
-        $result = file_put_contents($file_path, $data, $flags);
+        $result = file_put_contents($file_path, $data, FILE_APPEND | LOCK_EX);
         
         if ($result === false) {
             $this->send_error('Ошибка записи файла');
@@ -475,24 +468,24 @@ class WC1C_Exchange_Endpoint {
     }
 
     /**
-     * Очистка директории обмена
+     * Полная очистка директории обмена (вызывается при init)
      */
-    private function clean_exchange_dir(string $dir): void {
+    private function wipe_exchange_dir(string $dir): void {
         if (!is_dir($dir)) {
+            wp_mkdir_p($dir);
             return;
         }
 
-        $files = glob($dir . '/*');
-        $now = time();
-        $max_age = 3600; // 1 час
+        $iter = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
 
-        foreach ($files as $file) {
-            if (is_file($file)) {
-                if ($now - filemtime($file) > $max_age) {
-                    @unlink($file);
-                }
-            } elseif (is_dir($file)) {
-                $this->clean_exchange_dir($file);
+        foreach ($iter as $item) {
+            if ($item->isDir()) {
+                @rmdir($item->getPathname());
+            } else {
+                @unlink($item->getPathname());
             }
         }
     }

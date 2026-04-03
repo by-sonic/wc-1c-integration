@@ -145,6 +145,11 @@ class WC1C_CommerceML_Parser {
             return false;
         }
 
+        // Убираем BOM (UTF-8 BOM = EF BB BF), 1С часто добавляет его
+        if (substr($content, 0, 3) === "\xEF\xBB\xBF") {
+            $content = substr($content, 3);
+        }
+
         WC1C_Logger::log("Загрузка XML: {$file_path}, размер: " . strlen($content), 'info');
 
         if (preg_match('/encoding=["\']?([^"\'\s\?>]+)/i', $content, $matches)) {
