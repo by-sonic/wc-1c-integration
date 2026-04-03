@@ -88,6 +88,11 @@ class WC1C_CommerceML_Parser {
             throw new Exception('Не удалось разобрать XML предложений');
         }
 
+        // offers.xml может содержать свой Классификатор с определениями свойств
+        if (isset($xml->Классификатор)) {
+            $this->parse_classifier($xml->Классификатор);
+        }
+
         if (isset($xml->ПакетПредложений)) {
             $package = $xml->ПакетПредложений;
             
@@ -142,6 +147,9 @@ class WC1C_CommerceML_Parser {
                 $content = preg_replace('/encoding=["\']?[^"\'\s\?>]+/i', 'encoding="UTF-8"', $content);
             }
         }
+
+        // Убираем XML namespace, иначе SimpleXML не найдёт элементы по имени
+        $content = preg_replace('/xmlns\s*=\s*"[^"]*"/', '', $content, 1);
 
         $xml = simplexml_load_string($content, 'SimpleXMLElement', LIBXML_NOCDATA | LIBXML_COMPACT);
         
@@ -345,10 +353,6 @@ class WC1C_CommerceML_Parser {
             }
         }
 
-        if (isset($offer->Количество)) {
-            $offer_data['total_stock'] = floatval((string)$offer->Количество);
-        }
-
         if (isset($offer->Склад)) {
             foreach ($offer->Склад as $stock) {
                 $attrs = $stock->attributes();
@@ -363,6 +367,8 @@ class WC1C_CommerceML_Parser {
                 
                 $offer_data['total_stock'] += $quantity;
             }
+        } elseif (isset($offer->Количество)) {
+            $offer_data['total_stock'] = floatval((string)$offer->Количество);
         }
 
         if (isset($offer->ХарактеристикиТовара->ХарактеристикаТовара)) {

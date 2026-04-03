@@ -507,10 +507,10 @@ class WC1C_Product_Sync {
             foreach ($offer['characteristics'] as $char) {
                 $attr_name = 'pa_' . $this->make_attribute_slug($char['name']);
                 $attributes[$attr_name] = $char['value'];
-                
-                $this->add_variation_attribute_to_parent($parent_product, $char);
             }
             $variation->set_attributes($attributes);
+
+            $this->add_variation_attributes_to_parent($parent_product, $offer['characteristics']);
         }
 
         if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
@@ -535,50 +535,57 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Добавление атрибута вариации к родительскому товару
+     * Добавление атрибутов вариации к родительскому товару (батч, сохраняет один раз)
      */
-    private function add_variation_attribute_to_parent(WC_Product_Variable $parent, array $char): void {
-        $attr_slug = 'pa_' . $this->make_attribute_slug($char['name']);
-        
-        $this->maybe_create_attribute_taxonomy(
-            $this->make_attribute_slug($char['name']),
-            $char['name']
-        );
-
-        $term = get_term_by('name', $char['value'], $attr_slug);
-        if (!$term) {
-            $result = wp_insert_term($char['value'], $attr_slug);
-            if (!is_wp_error($result)) {
-                $term = get_term($result['term_id'], $attr_slug);
-            }
-        }
-
-        if (!$term) {
-            return;
-        }
-
+    private function add_variation_attributes_to_parent(WC_Product $parent, array $characteristics): void {
         $attributes = $parent->get_attributes();
-        
-        if (isset($attributes[$attr_slug])) {
-            $existing = $attributes[$attr_slug];
-            $options = $existing->get_options();
-            if (!in_array($term->term_id, $options)) {
-                $options[] = $term->term_id;
-                $existing->set_options($options);
+        $changed = false;
+
+        foreach ($characteristics as $char) {
+            $attr_slug = 'pa_' . $this->make_attribute_slug($char['name']);
+            
+            $this->maybe_create_attribute_taxonomy(
+                $this->make_attribute_slug($char['name']),
+                $char['name']
+            );
+
+            $term = get_term_by('name', $char['value'], $attr_slug);
+            if (!$term) {
+                $result = wp_insert_term($char['value'], $attr_slug);
+                if (!is_wp_error($result)) {
+                    $term = get_term($result['term_id'], $attr_slug);
+                }
             }
-            $existing->set_variation(true);
-        } else {
-            $attribute = new WC_Product_Attribute();
-            $attribute->set_id(wc_attribute_taxonomy_id_by_name($attr_slug));
-            $attribute->set_name($attr_slug);
-            $attribute->set_options([$term->term_id]);
-            $attribute->set_visible(true);
-            $attribute->set_variation(true);
-            $attributes[$attr_slug] = $attribute;
+
+            if (!$term) {
+                continue;
+            }
+
+            if (isset($attributes[$attr_slug])) {
+                $existing = $attributes[$attr_slug];
+                $options = $existing->get_options();
+                if (!in_array($term->term_id, $options)) {
+                    $options[] = $term->term_id;
+                    $existing->set_options($options);
+                    $changed = true;
+                }
+                $existing->set_variation(true);
+            } else {
+                $attribute = new WC_Product_Attribute();
+                $attribute->set_id(wc_attribute_taxonomy_id_by_name($attr_slug));
+                $attribute->set_name($attr_slug);
+                $attribute->set_options([$term->term_id]);
+                $attribute->set_visible(true);
+                $attribute->set_variation(true);
+                $attributes[$attr_slug] = $attribute;
+                $changed = true;
+            }
         }
 
-        $parent->set_attributes($attributes);
-        $parent->save();
+        if ($changed) {
+            $parent->set_attributes($attributes);
+            $parent->save();
+        }
     }
 
     /**
@@ -704,49 +711,29 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Обновление только цен и остатков
+     * Обновление цен/остатков и создание вариаций из offers.xml
+     *
+     * В реальном обмене 1С вариации определяются именно в offers.xml:
+     * ID имеет вид "parent_guid#variation_guid", плюс ХарактеристикиТовара.
      */
     public function update_offers(array $offers): array {
         $results = [
             'updated' => 0,
+            'created' => 0,
             'failed' => 0,
             'not_found' => 0,
             'errors' => [],
         ];
 
         foreach ($offers as $offer) {
-            $product_id = $this->get_wc_id($offer['id'], 'product');
-            
-            if (!$product_id) {
-                $product_id = $this->get_wc_id($offer['id'], 'variation');
-            }
-
-            if (!$product_id) {
-                $results['not_found']++;
-                continue;
-            }
-
             try {
-                $product = wc_get_product($product_id);
-                
-                if (!$product) {
-                    $results['not_found']++;
-                    continue;
+                $is_variation = strpos($offer['id'], '#') !== false;
+
+                if ($is_variation) {
+                    $this->process_variation_offer($offer, $results);
+                } else {
+                    $this->process_simple_offer($offer, $results);
                 }
-
-                if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
-                    $this->set_product_prices($product, $offer['prices']);
-                }
-
-                if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
-                    $stock = $offer['total_stock'] ?? 0;
-                    $product->set_stock_quantity($stock);
-                    $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
-                }
-
-                $product->save();
-                $results['updated']++;
-
             } catch (Exception $e) {
                 $results['failed']++;
                 $results['errors'][] = sprintf(
@@ -758,6 +745,129 @@ class WC1C_Product_Sync {
         }
 
         return $results;
+    }
+
+    /**
+     * Обработка простого предложения (без вариаций)
+     */
+    private function process_simple_offer(array $offer, array &$results): void {
+        $product_id = $this->get_wc_id($offer['id'], 'product');
+
+        if (!$product_id) {
+            $results['not_found']++;
+            return;
+        }
+
+        $product = wc_get_product($product_id);
+        if (!$product) {
+            $results['not_found']++;
+            return;
+        }
+
+        if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
+            $this->set_product_prices($product, $offer['prices']);
+        }
+
+        if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
+            $stock = $offer['total_stock'] ?? 0;
+            $product->set_stock_quantity($stock);
+            $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+        }
+
+        $product->save();
+        $results['updated']++;
+    }
+
+    /**
+     * Обработка предложения-вариации (ID содержит #)
+     */
+    private function process_variation_offer(array $offer, array &$results): void {
+        $parts = explode('#', $offer['id'], 2);
+        $parent_guid = $parts[0];
+        $variation_guid = $offer['id'];
+
+        // Ищем родительский товар
+        $parent_wc_id = $this->get_wc_id($parent_guid, 'product');
+        if (!$parent_wc_id) {
+            $results['not_found']++;
+            return;
+        }
+
+        $parent_product = wc_get_product($parent_wc_id);
+        if (!$parent_product) {
+            $results['not_found']++;
+            return;
+        }
+
+        // Конвертируем Simple → Variable при необходимости
+        if ($parent_product->is_type('simple')) {
+            wp_set_object_terms($parent_wc_id, 'variable', 'product_type');
+            wc_delete_product_transients($parent_wc_id);
+            $parent_product = wc_get_product($parent_wc_id);
+        }
+
+        // Регистрируем атрибуты характеристик на родителе
+        if (!empty($offer['characteristics'])) {
+            $this->add_variation_attributes_to_parent($parent_product, $offer['characteristics']);
+        }
+
+        // Ищем или создаём вариацию
+        $variation_wc_id = $this->get_wc_id($variation_guid, 'variation');
+        $variation = null;
+        $action = 'updated';
+
+        if ($variation_wc_id) {
+            $variation = wc_get_product($variation_wc_id);
+        }
+
+        if (!$variation) {
+            $variation = new \WC_Product_Variation();
+            $variation->set_parent_id($parent_wc_id);
+            $action = 'created';
+        }
+
+        // SKU
+        if (!empty($offer['sku'])) {
+            $existing_id = wc_get_product_id_by_sku($offer['sku']);
+            if (!$existing_id || $existing_id === $variation->get_id()) {
+                $variation->set_sku($offer['sku']);
+            }
+        }
+
+        // Характеристики → атрибуты вариации
+        if (!empty($offer['characteristics'])) {
+            $attrs = [];
+            foreach ($offer['characteristics'] as $char) {
+                $slug = 'pa_' . $this->make_attribute_slug($char['name']);
+                $attrs[$slug] = $char['value'];
+            }
+            $variation->set_attributes($attrs);
+        }
+
+        // Цены
+        if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
+            $this->set_product_prices($variation, $offer['prices']);
+        }
+
+        // Остатки
+        if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
+            $variation->set_manage_stock(true);
+            $stock = $offer['total_stock'] ?? 0;
+            $variation->set_stock_quantity($stock);
+            $variation->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+        }
+
+        $variation->set_status('publish');
+        $variation->update_meta_data('_1c_guid', $variation_guid);
+
+        $var_id = $variation->save();
+        $this->save_mapping($variation_guid, $var_id, 'variation');
+
+        if ($action === 'created') {
+            $results['created']++;
+        } else {
+            $results['updated']++;
+        }
     }
 
     /**
