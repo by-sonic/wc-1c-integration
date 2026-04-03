@@ -496,28 +496,42 @@ class WC1C_Admin_Settings {
             wp_send_json_error('Доступ запрещён');
         }
 
-        $url = WC1C_Exchange_Endpoint::get_exchange_url() . '?type=catalog&mode=checkauth';
+        $checks = [];
 
-        $response = wp_remote_get($url, [
-            'timeout' => 10,
-            'sslverify' => false,
-        ]);
+        // 1. Плагин включён
+        $checks[] = 'yes' === get_option('wc1c_enabled', 'yes')
+            ? '✓ Обмен включён'
+            : '✗ Обмен отключён';
 
-        if (is_wp_error($response)) {
-            wp_send_json_error($response->get_error_message());
+        // 2. Логин/пароль заданы
+        $user = get_option('wc1c_username', '');
+        $pass = get_option('wc1c_password', '');
+        $checks[] = (!empty($user) && !empty($pass))
+            ? '✓ Логин и пароль заданы'
+            : '⚠ Логин или пароль не заданы (доступ без авторизации)';
+
+        // 3. Папка обмена доступна для записи
+        $upload_dir = wp_upload_dir();
+        $exchange_dir = $upload_dir['basedir'] . '/wc-1c-exchange';
+        if (!is_dir($exchange_dir)) {
+            wp_mkdir_p($exchange_dir);
         }
+        $checks[] = is_writable($exchange_dir)
+            ? '✓ Папка обмена доступна для записи'
+            : '✗ Папка обмена НЕ доступна для записи: ' . $exchange_dir;
 
-        $body = wp_remote_retrieve_body($response);
-        $code = wp_remote_retrieve_response_code($response);
+        // 4. Таблица маппинга существует
+        global $wpdb;
+        $table = $wpdb->prefix . 'wc1c_id_mapping';
+        $exists = $wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table;
+        $checks[] = $exists
+            ? '✓ Таблица связей ID существует'
+            : '✗ Таблица связей ID не найдена';
 
-        if ($code === 200 && strpos($body, 'success') !== false) {
-            wp_send_json_success('Подключение успешно!');
-        } else {
-            wp_send_json_error(sprintf(
-                'Подключение не удалось. Код ответа: %d',
-                $code
-            ));
-        }
+        // 5. URL обмена
+        $checks[] = '✓ URL: ' . WC1C_Exchange_Endpoint::get_exchange_url();
+
+        wp_send_json_success(implode("\n", $checks));
     }
 
     public function ajax_manual_sync(): void {
