@@ -55,6 +55,7 @@ class WC1C_Admin_Settings {
         register_setting('wc1c_sync', 'wc1c_sync_prices', ['sanitize_callback' => $checkbox_sanitize]);
         register_setting('wc1c_sync', 'wc1c_sync_stock', ['sanitize_callback' => $checkbox_sanitize]);
         register_setting('wc1c_sync', 'wc1c_price_type', ['sanitize_callback' => 'sanitize_text_field']);
+        register_setting('wc1c_sync', 'wc1c_sale_price_type', ['sanitize_callback' => 'sanitize_text_field']);
         register_setting('wc1c_sync', 'wc1c_warehouse', ['sanitize_callback' => 'sanitize_text_field']);
 
         // Группа «Заказы»
@@ -289,13 +290,24 @@ class WC1C_Admin_Settings {
 
             <table class="form-table">
                 <tr>
-                    <th scope="row">Тип цены</th>
+                    <th scope="row">Тип основной цены</th>
                     <td>
                         <input type="text" name="wc1c_price_type"
                                value="<?php echo esc_attr(get_option('wc1c_price_type', 'Розничная')); ?>"
                                class="regular-text">
                         <p class="description">
-                            Наименование типа цен из 1С (например, «Розничная», «Оптовая»)
+                            Наименование типа цен из 1С для основной цены (например, «Розничные»)
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">Тип акционной цены</th>
+                    <td>
+                        <input type="text" name="wc1c_sale_price_type"
+                               value="<?php echo esc_attr(get_option('wc1c_sale_price_type', '')); ?>"
+                               class="regular-text">
+                        <p class="description">
+                            Наименование типа цен из 1С для скидки (например, «Акционный»). Оставьте пустым, если не используется.
                         </p>
                     </td>
                 </tr>

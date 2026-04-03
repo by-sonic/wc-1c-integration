@@ -431,22 +431,35 @@ class WC1C_Product_Sync {
      */
     private function set_product_prices(WC_Product $product, array $prices): void {
         $price_type = get_option('wc1c_price_type', 'Розничная');
+        $sale_price_type = get_option('wc1c_sale_price_type', '');
         
-        $selected_price = null;
+        $regular_price = null;
+        $sale_price = null;
+
         foreach ($prices as $price) {
             if ($price['type_name'] === $price_type || empty($price_type)) {
-                $selected_price = $price;
-                break;
+                $regular_price = $price['price'];
+            }
+            if (!empty($sale_price_type) && $price['type_name'] === $sale_price_type) {
+                $sale_price = $price['price'];
             }
         }
 
-        if (!$selected_price && !empty($prices)) {
-            $selected_price = reset($prices);
+        if ($regular_price === null && !empty($prices)) {
+            $first = reset($prices);
+            $regular_price = $first['price'];
         }
 
-        if ($selected_price) {
-            $product->set_regular_price($selected_price['price']);
-            $product->set_price($selected_price['price']);
+        if ($regular_price !== null) {
+            $product->set_regular_price($regular_price);
+
+            if ($sale_price !== null && $sale_price > 0 && $sale_price < $regular_price) {
+                $product->set_sale_price($sale_price);
+                $product->set_price($sale_price);
+            } else {
+                $product->set_sale_price('');
+                $product->set_price($regular_price);
+            }
         }
     }
 
