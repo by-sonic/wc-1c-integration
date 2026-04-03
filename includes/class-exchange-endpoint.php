@@ -257,7 +257,14 @@ class WC1C_Exchange_Endpoint {
             $this->send_error('Данные не получены');
         }
 
-        $result = file_put_contents($file_path, $data, FILE_APPEND | LOCK_EX);
+        // Первый чанк XML-файла (начинается с <?xml) — перезаписываем, а не дописываем,
+        // иначе повторный обмен склеит два XML-документа и парсинг сломается
+        $flags = FILE_APPEND | LOCK_EX;
+        if (strpos(ltrim($data), '<?xml') === 0) {
+            $flags = LOCK_EX;
+        }
+
+        $result = file_put_contents($file_path, $data, $flags);
         
         if ($result === false) {
             $this->send_error('Ошибка записи файла');
