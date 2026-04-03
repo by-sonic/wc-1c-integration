@@ -140,6 +140,13 @@ class WC1C_CommerceML_Parser {
         
         $content = file_get_contents($file_path);
         
+        if ($content === false || strlen($content) === 0) {
+            WC1C_Logger::log("Файл пуст или не читается: {$file_path}", 'error');
+            return false;
+        }
+
+        WC1C_Logger::log("Загрузка XML: {$file_path}, размер: " . strlen($content), 'info');
+
         if (preg_match('/encoding=["\']?([^"\'\s\?>]+)/i', $content, $matches)) {
             $encoding = strtoupper($matches[1]);
             if ($encoding !== 'UTF-8') {
@@ -148,15 +155,29 @@ class WC1C_CommerceML_Parser {
             }
         }
 
-        // Убираем XML namespace, иначе SimpleXML не найдёт элементы по имени
-        $content = preg_replace('/xmlns\s*=\s*"[^"]*"/', '', $content, 1);
+        // Убираем default namespace из корневого тега (не трогая весь файл)
+        $xml_decl_end = strpos($content, '?>');
+        $search_from = $xml_decl_end !== false ? $xml_decl_end + 2 : 0;
+        $root_end = strpos($content, '>', $search_from);
+        if ($root_end !== false) {
+            $root_tag = substr($content, 0, $root_end + 1);
+            $root_tag_clean = preg_replace('/\s+xmlns\s*=\s*"[^"]*"/', '', $root_tag, 1);
+            if ($root_tag_clean !== null && $root_tag_clean !== $root_tag) {
+                $content = $root_tag_clean . substr($content, $root_end + 1);
+            }
+        }
 
         $xml = simplexml_load_string($content, 'SimpleXMLElement', LIBXML_NOCDATA | LIBXML_COMPACT);
         
         if (!$xml) {
             $errors = libxml_get_errors();
             libxml_clear_errors();
-            WC1C_Logger::log('Ошибки разбора XML: ' . print_r($errors, true), 'error');
+            $error_msgs = [];
+            foreach ($errors as $err) {
+                $error_msgs[] = trim($err->message) . " (строка {$err->line})";
+            }
+            WC1C_Logger::log('Ошибки разбора XML: ' . implode('; ', $error_msgs), 'error');
+            WC1C_Logger::log('Первые 500 символов файла: ' . substr($content, 0, 500), 'error');
             return false;
         }
 

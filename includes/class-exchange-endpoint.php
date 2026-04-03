@@ -69,6 +69,8 @@ class WC1C_Exchange_Endpoint {
             return;
         }
 
+        status_header(200);
+        header('Content-Type: text/plain; charset=utf-8');
         nocache_headers();
 
         if ('yes' !== get_option('wc1c_enabled', 'yes')) {
