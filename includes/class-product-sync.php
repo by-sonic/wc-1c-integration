@@ -20,6 +20,9 @@ class WC1C_Product_Sync {
     /** @var array ID родительских товаров, у которых есть вариации (заполняется в sync_products) */
     private array $variation_parent_ids = [];
 
+    /** @var array Кэш конвертированных родительских товаров (WC ID → WC_Product_Variable) */
+    private array $variable_parents_cache = [];
+
     /**
      * Конструктор
      */
@@ -473,21 +476,9 @@ class WC1C_Product_Sync {
             throw new Exception('Родительский товар не найден');
         }
 
-        $parent_product = wc_get_product($parent_wc_id);
+        $parent_product = $this->ensure_variable_parent($parent_wc_id);
         if (!$parent_product) {
             throw new Exception('Родительский товар не найден в WooCommerce');
-        }
-
-        // Конвертируем Simple → Variable при необходимости
-        if ($parent_product->is_type('simple')) {
-            $parent_id = $parent_product->get_id();
-            wp_set_object_terms($parent_id, 'variable', 'product_type');
-            wc_delete_product_transients($parent_id);
-            $parent_product = wc_get_product($parent_id);
-        }
-
-        if (!$parent_product->is_type('variable')) {
-            throw new Exception('Родительский товар не является вариативным');
         }
 
         $variation_id = $this->get_wc_id($variation_data['id'], 'variation');
@@ -606,6 +597,42 @@ class WC1C_Product_Sync {
      */
     private function product_has_variations(string $product_id): bool {
         return isset($this->variation_parent_ids[$product_id]);
+    }
+
+    /**
+     * Получить родительский товар как WC_Product_Variable, конвертируя Simple если нужно.
+     *
+     * ВАЖНО: wc_get_product() после wp_set_object_terms может вернуть WC_Product_Simple из кэша.
+     * При вызове save() на WC_Product_Simple WooCommerce откатывает product_type обратно в simple.
+     * Поэтому нужно создавать new WC_Product_Variable напрямую.
+     */
+    private function ensure_variable_parent(int $wc_id): ?WC_Product_Variable {
+        if (isset($this->variable_parents_cache[$wc_id])) {
+            return $this->variable_parents_cache[$wc_id];
+        }
+
+        $product = wc_get_product($wc_id);
+        if (!$product) {
+            return null;
+        }
+
+        if ($product->is_type('variable')) {
+            $this->variable_parents_cache[$wc_id] = $product;
+            return $product;
+        }
+
+        // Конвертация: создаём объект WC_Product_Variable напрямую, не через фабрику
+        WC1C_Logger::log("Конвертация Simple→Variable: товар #{$wc_id} «{$product->get_name()}»", 'info');
+
+        $variable = new WC_Product_Variable($wc_id);
+        $variable->save();
+
+        // Очищаем все кэши
+        clean_post_cache($wc_id);
+        wc_delete_product_transients($wc_id);
+
+        $this->variable_parents_cache[$wc_id] = $variable;
+        return $variable;
     }
 
     /**
@@ -730,6 +757,8 @@ class WC1C_Product_Sync {
      * ID имеет вид "parent_guid#variation_guid", плюс ХарактеристикиТовара.
      */
     public function update_offers(array $offers): array {
+        $this->variable_parents_cache = [];
+
         $results = [
             'updated' => 0,
             'created' => 0,
@@ -806,17 +835,10 @@ class WC1C_Product_Sync {
             return;
         }
 
-        $parent_product = wc_get_product($parent_wc_id);
+        $parent_product = $this->ensure_variable_parent($parent_wc_id);
         if (!$parent_product) {
             $results['not_found']++;
             return;
-        }
-
-        // Конвертируем Simple → Variable при необходимости
-        if ($parent_product->is_type('simple')) {
-            wp_set_object_terms($parent_wc_id, 'variable', 'product_type');
-            wc_delete_product_transients($parent_wc_id);
-            $parent_product = wc_get_product($parent_wc_id);
         }
 
         // Регистрируем атрибуты характеристик на родителе
