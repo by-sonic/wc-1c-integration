@@ -507,14 +507,14 @@ class WC1C_Product_Sync {
         }
 
         if (!empty($offer['characteristics'])) {
+            $this->add_variation_attributes_to_parent($parent_product, $offer['characteristics']);
+
             $attributes = [];
             foreach ($offer['characteristics'] as $char) {
-                $attr_name = 'pa_' . $this->make_attribute_slug($char['name']);
-                $attributes[$attr_name] = $char['value'];
+                $taxonomy = 'pa_' . $this->make_attribute_slug($char['name']);
+                $attributes[$taxonomy] = $this->get_term_slug_for_variation($taxonomy, $char['value']);
             }
             $variation->set_attributes($attributes);
-
-            $this->add_variation_attributes_to_parent($parent_product, $offer['characteristics']);
         }
 
         if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
@@ -536,6 +536,26 @@ class WC1C_Product_Sync {
         $this->save_mapping($variation_data['id'], $var_id, 'variation');
 
         return ['action' => $action, 'variation_id' => $var_id];
+    }
+
+    /**
+     * Получить slug терма для атрибута вариации (WooCommerce требует slug, а не имя)
+     */
+    private function get_term_slug_for_variation(string $taxonomy, string $value): string {
+        $term = get_term_by('name', $value, $taxonomy);
+        if ($term) {
+            return $term->slug;
+        }
+
+        $result = wp_insert_term($value, $taxonomy);
+        if (!is_wp_error($result)) {
+            $term = get_term($result['term_id'], $taxonomy);
+            if ($term) {
+                return $term->slug;
+            }
+        }
+
+        return sanitize_title($value);
     }
 
     /**
@@ -869,12 +889,12 @@ class WC1C_Product_Sync {
             }
         }
 
-        // Характеристики → атрибуты вариации
+        // Характеристики → атрибуты вариации (WooCommerce требует slug терма, не текст)
         if (!empty($offer['characteristics'])) {
             $attrs = [];
             foreach ($offer['characteristics'] as $char) {
-                $slug = 'pa_' . $this->make_attribute_slug($char['name']);
-                $attrs[$slug] = $char['value'];
+                $taxonomy = 'pa_' . $this->make_attribute_slug($char['name']);
+                $attrs[$taxonomy] = $this->get_term_slug_for_variation($taxonomy, $char['value']);
             }
             $variation->set_attributes($attrs);
         }
