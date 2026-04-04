@@ -376,15 +376,9 @@ class WC1C_Product_Sync {
             $this->set_product_prices($product, $offer['prices']);
         }
 
-        if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
-            if ($product->is_type('variable')) {
-                $this->apply_variable_parent_stock_policy($product);
-            } else {
-                $product->set_manage_stock(true);
-                $stock = $offer['total_stock'] ?? 0;
-                $product->set_stock_quantity($stock);
-                $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
-            }
+        // У вариативного родителя остатки задаются по вариациям (offers) и суммируются в finalize
+        if ('yes' === get_option('wc1c_sync_stock', 'yes') && !$product->is_type('variable')) {
+            $this->assign_offer_stock_to_product($product, (float) ($offer['total_stock'] ?? 0));
         }
 
         $product->set_status('publish');
@@ -525,27 +519,77 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * У вариативного товара остатки ведутся по вариациям; родитель с manage_stock и qty=0 даёт «всего 0» в админке.
+     * Остаток с предложения 1С (логика как assignOffersItemInventories в wc1c-main-trunk).
      */
-    private function apply_variable_parent_stock_policy(WC_Product $product): void {
-        if (!$product->is_type('variable')) {
+    private function assign_offer_stock_to_product(WC_Product $product, float $quantity): void {
+        if ('yes' !== get_option('wc1c_sync_stock', 'yes')) {
             return;
         }
-        $product->set_manage_stock(false);
-        $product->set_stock_quantity('');
+
+        $product->set_manage_stock(true);
+        if ('yes' !== get_option('woocommerce_manage_stock')) {
+            $product->set_manage_stock(false);
+        }
+
+        $min_qty = (float) apply_filters('wc1c_inventories_quantities_min', 1.0, $product);
+        if ($quantity > 0 && $quantity < $min_qty) {
+            $quantity = 0.0;
+        }
+
+        $stock_status = $quantity > 0 ? 'instock' : 'outofstock';
+
+        if ($product->managing_stock()) {
+            if (function_exists('wc_update_product_stock') && $product->get_id() > 0) {
+                wc_update_product_stock($product, $quantity, 'set');
+            } else {
+                $product->set_stock_quantity($quantity);
+            }
+        }
+
+        $product->set_stock_status($stock_status);
     }
 
     /**
-     * После импорта вариаций: синхронизация статуса наличия родителя (как в WooCommerce)
+     * После обработки всех предложений-вариаций: на родителе включаем учёт запасов и записываем сумму по вариациям
+     * (галка «Управление запасами» + корректное «общее» количество в списке товаров).
      */
-    private function finalize_variable_parent_stock_after_variations(int $parent_id): void {
-        $p = wc_get_product($parent_id);
-        if (!$p || !$p->is_type('variable')) {
+    private function sync_variable_parent_stock_aggregate(int $parent_id): void {
+        if ('yes' !== get_option('wc1c_sync_stock', 'yes')) {
             return;
         }
-        $this->apply_variable_parent_stock_policy($p);
-        $p->save();
+
+        $parent = wc_get_product($parent_id);
+        if (!$parent || !$parent->is_type('variable')) {
+            return;
+        }
+
         wc_delete_product_transients($parent_id);
+        $parent = wc_get_product($parent_id);
+
+        $sum = 0.0;
+        foreach ($parent->get_children() as $child_id) {
+            $v = wc_get_product($child_id);
+            if ($v && $v->exists() && $v->managing_stock()) {
+                $sum += (float) $v->get_stock_quantity();
+            }
+        }
+
+        $parent->set_manage_stock(true);
+        if ('yes' !== get_option('woocommerce_manage_stock')) {
+            $parent->set_manage_stock(false);
+        }
+
+        if ($parent->managing_stock()) {
+            if (function_exists('wc_update_product_stock')) {
+                wc_update_product_stock($parent, $sum, 'set');
+            } else {
+                $parent->set_stock_quantity($sum);
+            }
+        }
+
+        $parent->set_stock_status($sum > 0 ? 'instock' : 'outofstock');
+        $parent->save();
+
         if (function_exists('wc_product_variable_sync_stock_status')) {
             wc_product_variable_sync_stock_status($parent_id);
         }
@@ -680,10 +724,7 @@ class WC1C_Product_Sync {
         }
 
         if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
-            $variation->set_manage_stock(true);
-            $stock = $offer['total_stock'] ?? 0;
-            $variation->set_stock_quantity($stock);
-            $variation->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+            $this->assign_offer_stock_to_product($variation, (float) ($offer['total_stock'] ?? 0));
         }
 
         $variation->set_status('publish');
@@ -836,7 +877,6 @@ class WC1C_Product_Sync {
         }
 
         if ($product->is_type('variable')) {
-            $this->apply_variable_parent_stock_policy($product);
             $this->variable_parents_cache[$wc_id] = $product;
             return $product;
         }
@@ -845,7 +885,6 @@ class WC1C_Product_Sync {
         WC1C_Logger::log("Конвертация Simple→Variable: товар #{$wc_id} «{$product->get_name()}»", 'info');
 
         $variable = new WC_Product_Variable($wc_id);
-        $this->apply_variable_parent_stock_policy($variable);
         $variable->save();
 
         // Очищаем все кэши
@@ -1016,7 +1055,7 @@ class WC1C_Product_Sync {
         }
 
         foreach (array_keys($variable_parent_ids_to_finalize) as $parent_wc_id) {
-            $this->finalize_variable_parent_stock_after_variations((int) $parent_wc_id);
+            $this->sync_variable_parent_stock_aggregate((int) $parent_wc_id);
         }
 
         return $results;
@@ -1043,15 +1082,8 @@ class WC1C_Product_Sync {
             $this->set_product_prices($product, $offer['prices']);
         }
 
-        if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
-            if ($product->is_type('variable')) {
-                $this->apply_variable_parent_stock_policy($product);
-            } else {
-                $stock = $offer['total_stock'] ?? 0;
-                $product->set_manage_stock(true);
-                $product->set_stock_quantity($stock);
-                $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
-            }
+        if ('yes' === get_option('wc1c_sync_stock', 'yes') && !$product->is_type('variable')) {
+            $this->assign_offer_stock_to_product($product, (float) ($offer['total_stock'] ?? 0));
         }
 
         $product->save();
@@ -1119,10 +1151,7 @@ class WC1C_Product_Sync {
         }
 
         if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
-            $variation->set_manage_stock(true);
-            $stock = $offer['total_stock'] ?? 0;
-            $variation->set_stock_quantity($stock);
-            $variation->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+            $this->assign_offer_stock_to_product($variation, (float) ($offer['total_stock'] ?? 0));
         }
 
         $variation->set_status('publish');
