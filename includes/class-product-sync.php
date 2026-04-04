@@ -377,10 +377,14 @@ class WC1C_Product_Sync {
         }
 
         if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
-            $product->set_manage_stock(true);
-            $stock = $offer['total_stock'] ?? 0;
-            $product->set_stock_quantity($stock);
-            $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+            if ($product->is_type('variable')) {
+                $this->apply_variable_parent_stock_policy($product);
+            } else {
+                $product->set_manage_stock(true);
+                $stock = $offer['total_stock'] ?? 0;
+                $product->set_stock_quantity($stock);
+                $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+            }
         }
 
         $product->set_status('publish');
@@ -489,39 +493,139 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Установка цен товара
+     * Нормализация наименования типа цены (1С часто шлёт NBSP, лишние пробелы)
+     */
+    private function normalize_price_type_label(string $name): string {
+        $name = str_replace(["\xc2\xa0", "\xe2\x80\xaf", '&nbsp;'], ' ', $name);
+        $name = trim(preg_replace('/\s+/u', ' ', $name));
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($name, 'UTF-8');
+        }
+        return strtolower($name);
+    }
+
+    /**
+     * Совпадение типа цены из XML с настройкой (без учёта регистра, пробелов, NBSP)
+     */
+    private function price_type_matches(string $xml_type_name, string $setting_name): bool {
+        if ($setting_name === '') {
+            return false;
+        }
+        $a = $this->normalize_price_type_label($xml_type_name);
+        $b = $this->normalize_price_type_label($setting_name);
+        if ($a === $b) {
+            return true;
+        }
+        if (strlen($a) > 2 && strlen($b) > 2) {
+            if (strpos($a, $b) !== false || strpos($b, $a) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * У вариативного товара остатки ведутся по вариациям; родитель с manage_stock и qty=0 даёт «всего 0» в админке.
+     */
+    private function apply_variable_parent_stock_policy(WC_Product $product): void {
+        if (!$product->is_type('variable')) {
+            return;
+        }
+        $product->set_manage_stock(false);
+        $product->set_stock_quantity('');
+    }
+
+    /**
+     * После импорта вариаций: синхронизация статуса наличия родителя (как в WooCommerce)
+     */
+    private function finalize_variable_parent_stock_after_variations(int $parent_id): void {
+        $p = wc_get_product($parent_id);
+        if (!$p || !$p->is_type('variable')) {
+            return;
+        }
+        $this->apply_variable_parent_stock_policy($p);
+        $p->save();
+        wc_delete_product_transients($parent_id);
+        if (function_exists('wc_product_variable_sync_stock_status')) {
+            wc_product_variable_sync_stock_status($parent_id);
+        }
+    }
+
+    /**
+     * Установка цен товара (основная + акционная; гибкое сопоставление типов из 1С)
      */
     private function set_product_prices(WC_Product $product, array $prices): void {
-        $price_type = get_option('wc1c_price_type', 'Розничная');
-        $sale_price_type = get_option('wc1c_sale_price_type', '');
-        
+        if (empty($prices)) {
+            return;
+        }
+
+        $rows = [];
+        foreach ($prices as $row) {
+            $rows[] = [
+                'type_name' => isset($row['type_name']) ? (string) $row['type_name'] : '',
+                'type_id' => isset($row['type_id']) ? (string) $row['type_id'] : '',
+                'price' => (float) $row['price'],
+            ];
+        }
+
+        $setting_regular = trim((string) get_option('wc1c_price_type', 'Розничная'));
+        $setting_sale = trim((string) get_option('wc1c_sale_price_type', ''));
+        $auto_sale = get_option('wc1c_sale_price_auto', 'yes') === 'yes';
+
         $regular_price = null;
+        $regular_source_type = '';
+
+        if ($setting_regular !== '') {
+            foreach ($rows as $r) {
+                if ($this->price_type_matches($r['type_name'], $setting_regular)) {
+                    $regular_price = $r['price'];
+                    $regular_source_type = $r['type_name'];
+                    break;
+                }
+            }
+        }
+
+        if ($regular_price === null) {
+            $first = reset($rows);
+            $regular_price = $first['price'];
+            $regular_source_type = $first['type_name'];
+        }
+
         $sale_price = null;
 
-        foreach ($prices as $price) {
-            if ($price['type_name'] === $price_type || empty($price_type)) {
-                $regular_price = $price['price'];
-            }
-            if (!empty($sale_price_type) && $price['type_name'] === $sale_price_type) {
-                $sale_price = $price['price'];
+        if ($setting_sale !== '') {
+            foreach ($rows as $r) {
+                if ($this->price_type_matches($r['type_name'], $setting_sale)) {
+                    $sale_price = $r['price'];
+                    break;
+                }
             }
         }
 
-        if ($regular_price === null && !empty($prices)) {
-            $first = reset($prices);
-            $regular_price = $first['price'];
+        if ($sale_price === null && $auto_sale && count($rows) > 1) {
+            $reg_norm = $this->normalize_price_type_label($regular_source_type);
+            foreach ($rows as $r) {
+                if ($reg_norm !== '' && $this->normalize_price_type_label($r['type_name']) === $reg_norm) {
+                    continue;
+                }
+                if ($r['price'] > 0 && $r['price'] < $regular_price - 0.005) {
+                    if ($sale_price === null || $r['price'] < $sale_price) {
+                        $sale_price = $r['price'];
+                    }
+                }
+            }
         }
 
-        if ($regular_price !== null) {
-            $product->set_regular_price($regular_price);
+        $reg_str = wc_format_decimal($regular_price);
+        $product->set_regular_price($reg_str);
 
-            if ($sale_price !== null && $sale_price > 0 && $sale_price < $regular_price) {
-                $product->set_sale_price($sale_price);
-                $product->set_price($sale_price);
-            } else {
-                $product->set_sale_price('');
-                $product->set_price($regular_price);
-            }
+        if ($sale_price !== null && $sale_price > 0 && $sale_price < $regular_price - 0.005) {
+            $sale_str = wc_format_decimal($sale_price);
+            $product->set_sale_price($sale_str);
+            $product->set_price($sale_str);
+        } else {
+            $product->set_sale_price('');
+            $product->set_price($reg_str);
         }
     }
 
@@ -732,6 +836,7 @@ class WC1C_Product_Sync {
         }
 
         if ($product->is_type('variable')) {
+            $this->apply_variable_parent_stock_policy($product);
             $this->variable_parents_cache[$wc_id] = $product;
             return $product;
         }
@@ -740,6 +845,7 @@ class WC1C_Product_Sync {
         WC1C_Logger::log("Конвертация Simple→Variable: товар #{$wc_id} «{$product->get_name()}»", 'info');
 
         $variable = new WC_Product_Variable($wc_id);
+        $this->apply_variable_parent_stock_policy($variable);
         $variable->save();
 
         // Очищаем все кэши
@@ -883,11 +989,18 @@ class WC1C_Product_Sync {
             'errors' => [],
         ];
 
+        $variable_parent_ids_to_finalize = [];
+
         foreach ($offers as $offer) {
             try {
                 $is_variation = strpos($offer['id'], '#') !== false;
 
                 if ($is_variation) {
+                    $parts = explode('#', $offer['id'], 2);
+                    $pid = $this->get_wc_id($parts[0], 'product');
+                    if ($pid) {
+                        $variable_parent_ids_to_finalize[$pid] = true;
+                    }
                     $this->process_variation_offer($offer, $results);
                 } else {
                     $this->process_simple_offer($offer, $results);
@@ -900,6 +1013,10 @@ class WC1C_Product_Sync {
                     $e->getMessage()
                 );
             }
+        }
+
+        foreach (array_keys($variable_parent_ids_to_finalize) as $parent_wc_id) {
+            $this->finalize_variable_parent_stock_after_variations((int) $parent_wc_id);
         }
 
         return $results;
@@ -927,9 +1044,14 @@ class WC1C_Product_Sync {
         }
 
         if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
-            $stock = $offer['total_stock'] ?? 0;
-            $product->set_stock_quantity($stock);
-            $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+            if ($product->is_type('variable')) {
+                $this->apply_variable_parent_stock_policy($product);
+            } else {
+                $stock = $offer['total_stock'] ?? 0;
+                $product->set_manage_stock(true);
+                $product->set_stock_quantity($stock);
+                $product->set_stock_status($stock > 0 ? 'instock' : 'outofstock');
+            }
         }
 
         $product->save();

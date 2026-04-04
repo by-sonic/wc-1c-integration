@@ -56,6 +56,7 @@ class WC1C_Admin_Settings {
         register_setting('wc1c_sync', 'wc1c_sync_stock', ['sanitize_callback' => $checkbox_sanitize]);
         register_setting('wc1c_sync', 'wc1c_price_type', ['sanitize_callback' => 'sanitize_text_field']);
         register_setting('wc1c_sync', 'wc1c_sale_price_type', ['sanitize_callback' => 'sanitize_text_field']);
+        register_setting('wc1c_sync', 'wc1c_sale_price_auto', ['sanitize_callback' => $checkbox_sanitize]);
         register_setting('wc1c_sync', 'wc1c_warehouse', ['sanitize_callback' => 'sanitize_text_field']);
 
         // Группа «Заказы»
@@ -307,7 +308,20 @@ class WC1C_Admin_Settings {
                                value="<?php echo esc_attr(get_option('wc1c_sale_price_type', '')); ?>"
                                class="regular-text">
                         <p class="description">
-                            Наименование типа цен из 1С для скидки (например, «Акционный»). Оставьте пустым, если не используется.
+                            Наименование типа цен из 1С для скидки (например, «Акционный»). Сравнение без учёта регистра, лишних пробелов и неразрывных пробелов.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">Авто-акция</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="wc1c_sale_price_auto" value="yes"
+                                   <?php checked(get_option('wc1c_sale_price_auto', 'yes'), 'yes'); ?>>
+                            Если акционный тип не указан или не найден — брать минимальную цену из файла, которая ниже основной
+                        </label>
+                        <p class="description">
+                            Удобно, когда в 1С несколько типов цен, а название акции отличается от настроек. При нескольких оптовых ценах отключите.
                         </p>
                     </td>
                 </tr>
