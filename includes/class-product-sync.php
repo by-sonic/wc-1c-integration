@@ -23,12 +23,43 @@ class WC1C_Product_Sync {
     /** @var array Кэш конвертированных родительских товаров (WC ID → WC_Product_Variable) */
     private array $variable_parents_cache = [];
 
+    /** @var array Кэш ID глобальных WC-атрибутов (taxonomy → int) */
+    private array $attribute_id_cache = [];
+
     /**
      * Конструктор
      */
     public function __construct() {
         global $wpdb;
         $this->mapping_table = $wpdb->prefix . 'wc1c_id_mapping';
+    }
+
+    /**
+     * Получить ID глобального WC-атрибута по имени таксономии.
+     * wc_attribute_taxonomy_id_by_name() может вернуть 0 из-за объектного кэша WC,
+     * поэтому используем прямой запрос к БД как fallback.
+     */
+    private function get_attribute_taxonomy_id(string $taxonomy): int {
+        if (isset($this->attribute_id_cache[$taxonomy])) {
+            return $this->attribute_id_cache[$taxonomy];
+        }
+
+        $id = wc_attribute_taxonomy_id_by_name($taxonomy);
+
+        if (!$id) {
+            global $wpdb;
+            $slug = str_replace('pa_', '', sanitize_title($taxonomy));
+            $id = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT attribute_id FROM {$wpdb->prefix}woocommerce_attribute_taxonomies WHERE attribute_name = %s",
+                $slug
+            ));
+        }
+
+        if ($id) {
+            $this->attribute_id_cache[$taxonomy] = $id;
+        }
+
+        return $id;
     }
 
     /**
@@ -366,32 +397,46 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Установка свойств товара
+     * Установка свойств товара (из import.xml ЗначенияСвойств)
      */
     private function set_product_attributes(WC_Product $product, array $attributes): void {
-        $product_attributes = [];
+        $product_attributes = $product->get_attributes();
 
         foreach ($attributes as $attr) {
             $attr_name = $this->make_attribute_slug($attr['name']);
-            $attr_slug = 'pa_' . $attr_name;
+            $taxonomy = 'pa_' . $attr_name;
 
             $this->maybe_create_attribute_taxonomy($attr_name, $attr['name']);
 
-            $term = get_term_by('name', $attr['value'], $attr_slug);
+            $term = get_term_by('name', $attr['value'], $taxonomy);
             if (!$term) {
-                $result = wp_insert_term($attr['value'], $attr_slug);
+                $result = wp_insert_term($attr['value'], $taxonomy);
                 if (!is_wp_error($result)) {
-                    $term = get_term($result['term_id'], $attr_slug);
+                    $term = get_term($result['term_id'], $taxonomy);
                 }
             }
 
-            if ($term) {
-                $product_attributes[$attr_slug] = new WC_Product_Attribute();
-                $product_attributes[$attr_slug]->set_id(wc_attribute_taxonomy_id_by_name($attr_slug));
-                $product_attributes[$attr_slug]->set_name($attr_slug);
-                $product_attributes[$attr_slug]->set_options([$term->term_id]);
-                $product_attributes[$attr_slug]->set_visible(true);
-                $product_attributes[$attr_slug]->set_variation(false);
+            if (!$term) {
+                continue;
+            }
+
+            $attr_id = $this->get_attribute_taxonomy_id($taxonomy);
+
+            if (isset($product_attributes[$taxonomy])) {
+                $existing = $product_attributes[$taxonomy];
+                $options = $existing->get_options();
+                if (!in_array($term->term_id, $options)) {
+                    $options[] = $term->term_id;
+                    $existing->set_options($options);
+                }
+            } else {
+                $attribute = new WC_Product_Attribute();
+                $attribute->set_id($attr_id);
+                $attribute->set_name($taxonomy);
+                $attribute->set_options([$term->term_id]);
+                $attribute->set_visible(true);
+                $attribute->set_variation(false);
+                $product_attributes[$taxonomy] = $attribute;
             }
         }
 
@@ -401,32 +446,46 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Создание таксономии свойств при необходимости
+     * Создание таксономии свойств при необходимости.
+     * Возвращает attribute_id (из wp_woocommerce_attribute_taxonomies).
      */
-    private function maybe_create_attribute_taxonomy(string $slug, string $name): void {
-        if (taxonomy_exists('pa_' . $slug)) {
-            return;
+    private function maybe_create_attribute_taxonomy(string $slug, string $name): int {
+        $taxonomy = 'pa_' . $slug;
+
+        if (taxonomy_exists($taxonomy)) {
+            return $this->get_attribute_taxonomy_id($taxonomy);
         }
 
-        $args = [
+        $result = wc_create_attribute([
             'name' => $name,
             'slug' => $slug,
             'type' => 'select',
             'order_by' => 'menu_order',
             'has_archives' => false,
-        ];
+        ]);
 
-        wc_create_attribute($args);
+        if (is_wp_error($result)) {
+            WC1C_Logger::log("Ошибка создания атрибута '{$name}' ({$slug}): " . $result->get_error_message(), 'error');
+            return 0;
+        }
 
-        register_taxonomy('pa_' . $slug, ['product'], [
-            'labels' => [
-                'name' => $name,
-            ],
+        // Принудительная очистка кэша атрибутов WC
+        delete_transient('wc_attribute_taxonomies');
+        wp_cache_delete('attribute_taxonomies', 'woocommerce-attributes');
+        unset($this->attribute_id_cache[$taxonomy]);
+
+        register_taxonomy($taxonomy, ['product'], [
+            'labels' => ['name' => $name],
             'hierarchical' => false,
             'show_ui' => false,
             'query_var' => true,
             'rewrite' => false,
         ]);
+
+        $attr_id = $this->get_attribute_taxonomy_id($taxonomy);
+        WC1C_Logger::log("Создан атрибут: '{$name}' → {$taxonomy}, attr_id={$attr_id}", 'info');
+
+        return $attr_id;
     }
 
     /**
@@ -467,11 +526,11 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Синхронизация вариации
+     * Синхронизация вариации (из import.xml, товар с # в ID)
      */
     private function sync_variation(array $variation_data, array $offer = []): array {
         $parent_wc_id = $this->get_wc_id($variation_data['parent_id'], 'product');
-        
+
         if (!$parent_wc_id) {
             throw new Exception('Родительский товар не найден');
         }
@@ -482,10 +541,10 @@ class WC1C_Product_Sync {
         }
 
         $variation_id = $this->get_wc_id($variation_data['id'], 'variation');
-        
+
         if ($variation_id) {
             $variation = wc_get_product($variation_id);
-            if (!$variation) {
+            if (!$variation || !$variation->exists()) {
                 $variation_id = null;
             }
         }
@@ -508,13 +567,8 @@ class WC1C_Product_Sync {
 
         if (!empty($offer['characteristics'])) {
             $this->add_variation_attributes_to_parent($parent_product, $offer['characteristics']);
-
-            $attributes = [];
-            foreach ($offer['characteristics'] as $char) {
-                $taxonomy = 'pa_' . $this->make_attribute_slug($char['name']);
-                $attributes[$taxonomy] = $this->get_term_slug_for_variation($taxonomy, $char['value']);
-            }
-            $variation->set_attributes($attributes);
+            $attrs = $this->build_variation_attributes($parent_product, $offer['characteristics']);
+            $variation->set_attributes($attrs);
         }
 
         if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
@@ -539,77 +593,118 @@ class WC1C_Product_Sync {
     }
 
     /**
-     * Получить slug терма для атрибута вариации (WooCommerce требует slug, а не имя)
+     * Собрать массив атрибутов для вариации, сверяясь с родителем.
+     *
+     * Копирует подход рабочего плагина (setVariationAttributes):
+     * — ключ = sanitize_title(parent_attribute->get_name())
+     * — значение = term->slug (для таксономий) или sanitize_title (fallback)
+     * — атрибут должен существовать на родителе и иметь get_variation()=true
      */
-    private function get_term_slug_for_variation(string $taxonomy, string $value): string {
-        $term = get_term_by('name', $value, $taxonomy);
-        if ($term) {
-            return $term->slug;
-        }
-
-        $result = wp_insert_term($value, $taxonomy);
-        if (!is_wp_error($result)) {
-            $term = get_term($result['term_id'], $taxonomy);
-            if ($term) {
-                return $term->slug;
-            }
-        }
-
-        return sanitize_title($value);
-    }
-
-    /**
-     * Добавление атрибутов вариации к родительскому товару (батч, сохраняет один раз)
-     */
-    private function add_variation_attributes_to_parent(WC_Product $parent, array $characteristics): void {
-        $attributes = $parent->get_attributes();
-        $changed = false;
+    private function build_variation_attributes(WC_Product $parent, array $characteristics): array {
+        $parent_attributes = $parent->get_attributes();
+        $attrs = [];
 
         foreach ($characteristics as $char) {
-            $attr_slug = 'pa_' . $this->make_attribute_slug($char['name']);
-            
-            $this->maybe_create_attribute_taxonomy(
-                $this->make_attribute_slug($char['name']),
-                $char['name']
-            );
+            $taxonomy = 'pa_' . $this->make_attribute_slug($char['name']);
 
-            $term = get_term_by('name', $char['value'], $attr_slug);
-            if (!$term) {
-                $result = wp_insert_term($char['value'], $attr_slug);
-                if (!is_wp_error($result)) {
-                    $term = get_term($result['term_id'], $attr_slug);
-                }
-            }
-
-            if (!$term) {
+            if (!isset($parent_attributes[$taxonomy])) {
+                WC1C_Logger::log("Атрибут {$taxonomy} не найден на родителе #{$parent->get_id()}, пропуск", 'warning');
                 continue;
             }
 
-            if (isset($attributes[$attr_slug])) {
-                $existing = $attributes[$attr_slug];
+            $parent_attr = $parent_attributes[$taxonomy];
+            if (!$parent_attr->get_variation()) {
+                WC1C_Logger::log("Атрибут {$taxonomy} на родителе #{$parent->get_id()} не отмечен как вариативный", 'warning');
+                continue;
+            }
+
+            $attribute_key = sanitize_title($parent_attr->get_name());
+
+            if ($parent_attr->is_taxonomy()) {
+                $term = get_term_by('name', $char['value'], $taxonomy);
+                $value = ($term && !is_wp_error($term)) ? $term->slug : sanitize_title($char['value']);
+            } else {
+                $value = $char['value'];
+            }
+
+            $attrs[$attribute_key] = $value;
+        }
+
+        return $attrs;
+    }
+
+    /**
+     * Добавление атрибутов вариации к родительскому товару.
+     *
+     * По аналогии с рабочим плагином wc1c-main-trunk:
+     * — всегда сохраняем родителя (гарантия set_variation=1)
+     * — явный wp_set_object_terms для привязки термов
+     * — fallback получения attr_id через прямой запрос к БД
+     */
+    private function add_variation_attributes_to_parent(WC_Product $parent, array $characteristics): void {
+        $attributes = $parent->get_attributes();
+        $parent_id = $parent->get_id();
+
+        foreach ($characteristics as $char) {
+            $slug = $this->make_attribute_slug($char['name']);
+            $taxonomy = 'pa_' . $slug;
+
+            $attr_id = $this->maybe_create_attribute_taxonomy($slug, $char['name']);
+
+            $term = get_term_by('name', $char['value'], $taxonomy);
+            if (!$term) {
+                $result = wp_insert_term($char['value'], $taxonomy);
+                if (is_wp_error($result)) {
+                    if ($result->get_error_code() === 'term_exists') {
+                        $term = get_term((int) $result->get_error_data(), $taxonomy);
+                    } else {
+                        WC1C_Logger::log("wp_insert_term('{$char['value']}', '{$taxonomy}'): " . $result->get_error_message(), 'warning');
+                        continue;
+                    }
+                } else {
+                    $term = get_term($result['term_id'], $taxonomy);
+                }
+            }
+
+            if (!$term || is_wp_error($term)) {
+                continue;
+            }
+
+            // Привязываем терм к родительскому товару (append=true)
+            wp_set_object_terms($parent_id, $term->term_id, $taxonomy, true);
+
+            if (isset($attributes[$taxonomy])) {
+                $existing = $attributes[$taxonomy];
                 $options = $existing->get_options();
                 if (!in_array($term->term_id, $options)) {
                     $options[] = $term->term_id;
                     $existing->set_options($options);
-                    $changed = true;
                 }
-                $existing->set_variation(true);
+                if (!$existing->get_variation()) {
+                    $existing->set_variation(true);
+                }
+                if (!$attr_id) {
+                    $attr_id = $this->get_attribute_taxonomy_id($taxonomy);
+                }
+                if ($existing->get_id() === 0 && $attr_id) {
+                    $existing->set_id($attr_id);
+                }
             } else {
+                if (!$attr_id) {
+                    $attr_id = $this->get_attribute_taxonomy_id($taxonomy);
+                }
                 $attribute = new WC_Product_Attribute();
-                $attribute->set_id(wc_attribute_taxonomy_id_by_name($attr_slug));
-                $attribute->set_name($attr_slug);
+                $attribute->set_id($attr_id);
+                $attribute->set_name($taxonomy);
                 $attribute->set_options([$term->term_id]);
                 $attribute->set_visible(true);
                 $attribute->set_variation(true);
-                $attributes[$attr_slug] = $attribute;
-                $changed = true;
+                $attributes[$taxonomy] = $attribute;
             }
         }
 
-        if ($changed) {
-            $parent->set_attributes($attributes);
-            $parent->save();
-        }
+        $parent->set_attributes($attributes);
+        $parent->save();
     }
 
     /**
@@ -778,6 +873,7 @@ class WC1C_Product_Sync {
      */
     public function update_offers(array $offers): array {
         $this->variable_parents_cache = [];
+        $this->attribute_id_cache = [];
 
         $results = [
             'updated' => 0,
@@ -848,7 +944,6 @@ class WC1C_Product_Sync {
         $parent_guid = $parts[0];
         $variation_guid = $offer['id'];
 
-        // Ищем родительский товар
         $parent_wc_id = $this->get_wc_id($parent_guid, 'product');
         if (!$parent_wc_id) {
             $results['not_found']++;
@@ -861,7 +956,7 @@ class WC1C_Product_Sync {
             return;
         }
 
-        // Регистрируем атрибуты характеристик на родителе
+        // Регистрируем атрибуты характеристик на родителе (до создания вариации)
         if (!empty($offer['characteristics'])) {
             $this->add_variation_attributes_to_parent($parent_product, $offer['characteristics']);
         }
@@ -873,6 +968,9 @@ class WC1C_Product_Sync {
 
         if ($variation_wc_id) {
             $variation = wc_get_product($variation_wc_id);
+            if (!$variation || !$variation->exists()) {
+                $variation = null;
+            }
         }
 
         if (!$variation) {
@@ -881,7 +979,6 @@ class WC1C_Product_Sync {
             $action = 'created';
         }
 
-        // SKU
         if (!empty($offer['sku'])) {
             $existing_id = wc_get_product_id_by_sku($offer['sku']);
             if (!$existing_id || $existing_id === $variation->get_id()) {
@@ -889,22 +986,16 @@ class WC1C_Product_Sync {
             }
         }
 
-        // Характеристики → атрибуты вариации (WooCommerce требует slug терма, не текст)
+        // Атрибуты вариации — по образцу рабочего плагина (setVariationAttributes)
         if (!empty($offer['characteristics'])) {
-            $attrs = [];
-            foreach ($offer['characteristics'] as $char) {
-                $taxonomy = 'pa_' . $this->make_attribute_slug($char['name']);
-                $attrs[$taxonomy] = $this->get_term_slug_for_variation($taxonomy, $char['value']);
-            }
+            $attrs = $this->build_variation_attributes($parent_product, $offer['characteristics']);
             $variation->set_attributes($attrs);
         }
 
-        // Цены
         if (!empty($offer['prices']) && 'yes' === get_option('wc1c_sync_prices', 'yes')) {
             $this->set_product_prices($variation, $offer['prices']);
         }
 
-        // Остатки
         if ('yes' === get_option('wc1c_sync_stock', 'yes')) {
             $variation->set_manage_stock(true);
             $stock = $offer['total_stock'] ?? 0;
